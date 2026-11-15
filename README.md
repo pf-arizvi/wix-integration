@@ -9,7 +9,7 @@ Premium Fulfilment's in-house integration between client **Wix** stores and our 
 
 Behaviour, mappings and data model: [`docs/SPEC.md`](docs/SPEC.md).
 
-> **Status:** Phase 0 (scaffold). Flows are stubs; only `/healthz` and `/admin/health` respond.
+> **Status:** Phase 1 (order import). Mintsoft writes are **off** by default (see Guardrails).
 
 ---
 
@@ -71,6 +71,57 @@ npm run deploy
 After the first deploy, set `WORKER_BASE_URL` in `wrangler.jsonc` to the deployed URL (e.g. `https://wix-integration.<account>.workers.dev`) and deploy again. It is used to build the Mintsoft despatch webhook URLs.
 
 > ⚠️ `ENCRYPTION_KEY` decrypts every stored client Wix API key. Keep a copy in the team password manager. Losing it means re-entering every client's key, and changing it requires re-encrypting them.
+
+## Mintsoft write guardrails
+
+Nothing is written to Mintsoft unless **both** are true (checked in `src/adapters/mintsoft/client.ts` before any request leaves the Worker):
+
+| Var (`wrangler.jsonc`) | Default | Effect |
+|---|---|---|
+| `MINTSOFT_WRITES_ENABLED` | `"false"` | Only the exact string `"true"` enables writes. Otherwise the cron import is skipped and `run-import` is a dry run. |
+| `MINTSOFT_ALLOWED_CLIENT_IDS` | `"38"` | Comma-separated. A write for any other ClientId is refused. |
+
+On top of that, onboarding checks the client's ID and exact name against Mintsoft, and every created order is read back to confirm its ClientId. On a mismatch the client is deactivated and the run halts.
+
+A **dry run** writes nothing anywhere: not Mintsoft, not D1 (no order rows, no errors, cursor unchanged). It returns the exact payload that *would* be sent. That includes customer name and address, so it's admin-only and never logged.
+
+## Onboarding a client (admin API)
+
+All `/admin/*` calls need `-H "Authorization: Bearer $ADMIN_TOKEN"`. `BASE=https://wix-integration.pf-integrations.workers.dev`.
+
+```sh
+# 1. Create the client. Nothing is written to Mintsoft or Wix.
+#    mintsoft_client_name must EXACTLY match the name in Mintsoft for that ID.
+#    import_orders_since: import paid orders updated since then (default: now).
+curl -X POST $BASE/admin/clients -H "Authorization: Bearer $ADMIN_TOKEN" -H "Content-Type: application/json" -d '{
+  "slug": "wix-test",
+  "name": "Wix Test Client",
+  "mintsoft_client_id": 38,
+  "mintsoft_client_name": "Wix Test Client",
+  "wix_site_id": "<wix site id>",
+  "wix_api_key": "<wix api key>",
+  "default_courier_service_id": <mintsoft courier service id>,
+  "default_carrier_name": "Royal Mail",
+  "import_orders_since": "2026-11-15T00:00:00Z"
+}'
+
+# 2. Map Wix shipping methods to Mintsoft courier services (optional if the default is enough)
+curl -X PUT $BASE/admin/clients/wix-test/courier-map -H "Authorization: Bearer $ADMIN_TOKEN" -H "Content-Type: application/json" -d '{
+  "mappings": [
+    { "wix_shipping_title": "Standard Shipping", "mintsoft_courier_service_id": 1, "carrier_display_name": "Royal Mail" },
+    { "wix_shipping_title": "Express Shipping",  "mintsoft_courier_service_id": 2, "carrier_display_name": "DPD" }
+  ]
+}'
+
+# 3. Dry run: see exactly what would be sent (default; safe any time)
+curl -X POST "$BASE/admin/clients/wix-test/run-import" -H "Authorization: Bearer $ADMIN_TOKEN"
+
+# 4. Real import: only once MINTSOFT_WRITES_ENABLED="true" has been deployed
+curl -X POST "$BASE/admin/clients/wix-test/run-import?dryRun=false" -H "Authorization: Bearer $ADMIN_TOKEN"
+
+# List clients (never shows keys or webhook tokens)
+curl $BASE/admin/clients -H "Authorization: Bearer $ADMIN_TOKEN"
+```
 
 ## Commands
 

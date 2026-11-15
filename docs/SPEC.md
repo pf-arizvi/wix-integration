@@ -153,8 +153,10 @@ Auth: `ms-apikey: <MINTSOFT_API_KEY>` (one warehouse-level key, Worker secret).
 
 | Purpose | Method + path | Notes |
 |---|---|---|
-| Create order | `PUT /api/Order` | Returns Mintsoft order ID. Duplicate OrderNumber per client should be rejected — VERIFY behaviour. |
-| Register webhooks | `/api/Order/{id}/ConnectActions` | `ExtraCode1` = despatch URL, `ExtraCode2` = cancel URL. `SourceOrderId` = Wix order number (unique per 3PL client). VERIFY method (PUT/POST) and body. |
+| Create order | `PUT /api/Order` | Body `NewOrderWithItems`; returns `[NewOrderResult]` (`Success`, `OrderId`, `Message`). Duplicate-OrderNumber behaviour unknown, so we pre-check instead (row below). |
+| Register webhooks | Inline `ConnectAction` in the `PUT /api/Order` body (Swagger: "Optionally include ConnectAction"). `PUT /api/Order/{id}/ConnectActions` also exists. | `Type` = `API` (VERIFY: documented for ASN webhooks), `ExtraCode1` = despatch URL, `ExtraCode2` = cancel URL (VERIFY), `Complete` = false. `SourceOrderId` = Wix order number. Inline = no window where an order exists without its webhook. |
+| Find order by number | `GET /api/Order/Search?OrderNumber=&exactMatch=true` | Returns `[Order]` incl. `ClientId`; filter ClientId client-side. Used for idempotency before every create. |
+| SKU exists? | `GET /api/Product/LookupProductId?SKU=&ClientId=` | Returns product ID. VERIFY what an unknown SKU returns (handled: 0 / empty / 404). |
 | Get order | `GET /api/Order/{id}` | Despatch webhook POSTs the same JSON as this call. Includes tracking number + URL. |
 | Despatched since | Order list with `SinceDespatchDate` | 100/page cap. ClientId filter ignored on warehouse keys → filter client-side. |
 | Products | `PUT /api/Product`, lookup by SKU | VERIFY endpoints/fields. |
@@ -184,12 +186,13 @@ All Mintsoft field names: **VERIFY against Swagger** (keep in one object so they
 | Phone | `recipientInfo.contactDetails.phone` | |
 | CourierServiceId | `shippingInfo.title` / `shippingInfo.code` | Via `courier_map` table (§5). No match → client default; no default → hold order. |
 | OrderValue | `priceSummary.total.amount` | number |
-| ShippingTotal | `priceSummary.shipping.amount` | VERIFY field name |
+| ShippingTotalExVat | `priceSummary.shipping.amount` | Swagger has no `ShippingTotal`. "Values only": no line-level VAT split. |
+| TotalVat | `priceSummary.tax.amount` | |
 | Currency | `currency` | |
 | OrderItems[].SKU | `lineItems[].physicalProperties.sku` | Required. Missing → hold whole order. |
 | OrderItems[].Quantity | `lineItems[].quantity` | |
 | OrderItems[].UnitPrice | `lineItems[].price.amount` | |
-| Comments / notes | `buyerNote` (if present) | VERIFY Mintsoft field |
+| Comments | `buyerNote` (if present) | Agreed: Comments (not DeliveryNotes). |
 
 Line filtering:
 - Skip lines where `physicalProperties.shippable === false` or `itemType.preset !== "PHYSICAL"` (digital, gift cards, services). If no shippable lines remain, record as `skipped_non_physical`.
@@ -300,9 +303,12 @@ For each active client, until `MAX_ORDERS_PER_RUN` (15) orders processed in tota
    - If `order_map` row exists with status not in (`held`) → skip (already handled).
    - If `held` → retry only if `attempts < 5` (errors may have been fixed, e.g. SKU added in Mintsoft).
    - Validate + map (§4.1). Validation failure → upsert `held` + `error_log`. Do not call Mintsoft.
-   - `PUT /api/Order`. If Mintsoft reports duplicate → look up existing order, store its id, mark `imported`.
-   - Register ConnectActions: despatch URL `https://<worker>/webhooks/mintsoft/despatch/<slug>?token=<webhook_token>`.
+   - Order Search by OrderNumber (filtered to the client). Found → store its id, mark `imported`, no create.
+   - LookupProductId for every distinct SKU. Any missing → hold `unknown_sku` (whole order).
+   - `PUT /api/Order` with inline ConnectAction (despatch URL `https://<worker>/webhooks/mintsoft/despatch/<slug>?token=<webhook_token>`). `Success=false` → hold.
+   - `GET /api/Order/{id}` and confirm `ClientId` matches. Mismatch → deactivate client, `mintsoft_client_mismatch`, halt the run.
    - Upsert `order_map` = `imported`.
+   - Held orders are retried when they reappear in the search window; otherwise via the admin retry endpoint (Phase 3).
 3. Advance `orders_cursor` to the max `updatedDate` fully processed (not past any order left unprocessed due to the batch cap).
 4. Rotate client order between runs so one busy client can't starve others.
 
@@ -337,7 +343,7 @@ Mintsoft `ExtraCode2` cancel webhook → log to `error_log` with code `mintsoft_
 5. Return a report: created / skipped_existing / missing_sku / errors.
 
 ### 6.7 Admin endpoints (Bearer `ADMIN_TOKEN`)
-- `POST /admin/clients` — create client (body: name, slug, mintsoft_client_id, wix_site_id, wix_api_key, defaults). Encrypts key, generates webhook token, detects catalog version, test-calls Wix + Mintsoft, returns webhook URL.
+- `POST /admin/clients` — create client (body: name, slug, mintsoft_client_id, mintsoft_client_name, wix_site_id, wix_api_key, defaults, optional import_orders_since). Encrypts key, generates webhook token, detects catalog version (Phase 4), test-calls Wix + Mintsoft, returns webhook URL.
 - `GET /admin/clients` — list (never return keys).
 - `PUT /admin/clients/:slug/courier-map` — upsert mappings.
 - `POST /admin/clients/:slug/run-import` — run F1 for one client now.
@@ -349,7 +355,14 @@ Mintsoft `ExtraCode2` cancel webhook → log to `error_log` with code `mintsoft_
 
 ## 7. Configuration & secrets
 
-`wrangler.jsonc` (or `.toml`): D1 binding `DB`, crons `["*/5 * * * *", "0 * * * *"]`, vars `MAX_ORDERS_PER_RUN=15`, `DEBUG_PAYLOADS=false`, `WORKER_BASE_URL`.
+`wrangler.jsonc` (or `.toml`): D1 binding `DB`, crons `["*/5 * * * *", "0 * * * *"]`, vars `MAX_ORDERS_PER_RUN=15`, `DEBUG_PAYLOADS=false`, `WORKER_BASE_URL`, `MINTSOFT_WRITES_ENABLED=false`, `MINTSOFT_ALLOWED_CLIENT_IDS=38`.
+
+### 7.1 Mintsoft write guardrails
+Enforced in `src/adapters/mintsoft/client.ts` (every write goes through one guarded function):
+1. **Kill switch** `MINTSOFT_WRITES_ENABLED`: only the exact string `true` enables writes. Otherwise the cron import is skipped and `run-import` is a dry run that writes nothing anywhere (Mintsoft, order_map, error_log, cursor) and returns would-be payloads.
+2. **ClientId allowlist** `MINTSOFT_ALLOWED_CLIENT_IDS`: any write whose body ClientId is not listed is refused before the request is sent.
+3. **Onboarding check**: `POST /admin/clients` requires `mintsoft_client_name`, and it must exactly equal the Name Mintsoft has for that ID.
+4. **Read-back**: after create, `GET /api/Order/{id}` must report the expected ClientId, otherwise the client is deactivated and the run halts.
 
 Secrets (`wrangler secret put`, and `.dev.vars` locally):
 - `MINTSOFT_API_KEY`
