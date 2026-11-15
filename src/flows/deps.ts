@@ -5,7 +5,7 @@
 import { createMintsoftApi } from "../adapters/mintsoft/client";
 import { findClientById } from "../adapters/mintsoft/clients";
 import { listCourierExternalNames, listCourierServices } from "../adapters/mintsoft/couriers";
-import { createOrder, findOrdersByNumber, getOrder, getOrderItems } from "../adapters/mintsoft/orders";
+import { createOrder, findOrdersByNumber, getOrder, getOrderItems, listDespatchedSince } from "../adapters/mintsoft/orders";
 import { createFulfilment, listFulfilments } from "../adapters/wix/fulfilments";
 import { createProduct, getProduct, lookupProductId } from "../adapters/mintsoft/products";
 import { getCatalogVersion, queryVariantsV3 } from "../adapters/wix/catalog";
@@ -34,6 +34,7 @@ export function createFlowDeps(env: Env, opts: { http?: HttpClient } = {}): Flow
     createOrder: (o) => createOrder(api, o),
     getOrder: (id) => getOrder(api, id),
     getOrderItems: (id) => getOrderItems(api, id),
+    listDespatchedSince: (since, page) => listDespatchedSince(api, since, page),
     createProduct: (p) => createProduct(api, p),
     getProduct: (id) => getProduct(api, id),
     listCourierServices: () => listCourierServices(api),

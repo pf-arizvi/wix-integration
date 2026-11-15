@@ -78,6 +78,7 @@ export interface MintsoftOrder {
   OrderNumber?: string;
   ExternalOrderReference?: string;
   OrderStatusId?: number;
+  DespatchDate?: string;
   WarehouseId?: number;
   ChannelId?: number;
   CourierServiceId?: number;

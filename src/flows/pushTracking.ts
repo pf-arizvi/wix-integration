@@ -13,6 +13,7 @@
  * Writes to Wix only (never Mintsoft). Wix may email the buyer a shipping notification.
  */
 import type { WixOrder } from "../adapters/wix/types";
+import { getCarrierName } from "../db/carrierNames";
 import type { ClientRecord } from "../db/clients";
 import { listCourierRules } from "../db/courierMap";
 import { recordError } from "../db/errors";
@@ -93,7 +94,14 @@ export async function handleDespatch(deps: FlowDeps, client: ClientRecord, paylo
     const target = await deps.fulfilmentTargetFor(client);
     const wixOrder = await target.getOrder(row.wixOrderId);
     const existing = await target.listFulfilments(row.wixOrderId);
-    const provider = d.courierName ?? (await carrierFromCourierMap(deps, client, wixOrder)) ?? client.defaultCarrierName ?? "Courier";
+    // Carrier shown in Wix: our carrier_names mapping for the service actually used (Mintsoft sends
+    // CourierServiceId but CourierServiceName is null) → payload name → courier map → client default.
+    const provider =
+      (d.courierServiceId != null ? await getCarrierName(deps.db, d.courierServiceId) : null) ??
+      d.courierName ??
+      (await carrierFromCourierMap(deps, client, wixOrder)) ??
+      client.defaultCarrierName ??
+      "Courier";
 
     const plan = planFulfilment({
       wixOrder,
@@ -146,7 +154,7 @@ export async function handleDespatch(deps: FlowDeps, client: ClientRecord, paylo
 }
 
 /** ExternalOrderReference (Wix order id) → Mintsoft order id → OrderNumber (minus the client prefix). */
-async function findOrderRow(deps: FlowDeps, client: ClientRecord, d: DespatchInfo): Promise<OrderMapRecord | null> {
+export async function findOrderRow(deps: FlowDeps, client: ClientRecord, d: DespatchInfo): Promise<OrderMapRecord | null> {
   if (d.externalOrderReference) {
     const r = await getOrderMapByWixId(deps.db, client.id, d.externalOrderReference);
     if (r) return r;

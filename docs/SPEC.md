@@ -38,7 +38,7 @@ Cron (*/5)  ──► flows/importOrders ──► adapters/wix/orders ──►
 Mintsoft ──POST──► /webhooks/mintsoft/despatch/:clientSlug?token=…
                          └──► flows/pushTracking ──► adapters/wix/fulfilments ──► Wix
 
-Cron (hourly) ──► flows/reconcile ──► Mintsoft (despatched since) ──► flows/pushTracking
+Cron (*/5, +2 min) ──► flows/reconcile ──► Mintsoft (despatched since) ──► flows/pushTracking
 
 Admin (Bearer ADMIN_TOKEN) ──► /admin/* ──► flows/importProducts, client config, manual runs
 ```
@@ -203,10 +203,10 @@ Line filtering:
 - Use `recipientInfo` for delivery address, never `billingInfo` (gift orders).
 
 ### 4.2 Mintsoft despatch → Wix fulfilment (`mapping/trackingMapper.ts`)
-Payload = Mintsoft order JSON (same as `GET /api/Order/{id}`). Exact field names UNCONFIRMED — parse defensively:
+Payload = Mintsoft order JSON, the same as `GET /api/Order/{id}`. **Confirmed with order 41233 (2026-11-15):** `ID`, `ClientId`, `OrderNumber`, `ExternalOrderReference`, `TrackingNumber`, `TrackingURL` (can be `""`), `CourierServiceId`, `CourierServiceName` (was `null`), `DespatchDate`, `OrderItems[].SKU/Quantity`. Still parsed defensively:
 - tracking number: try `TrackingNumber`, then known alternates; log full keys if not found.
 - tracking URL: try `TrackingURL` / `TrackingUrl`.
-- courier name: try `CourierService.Name`, `CourierServiceName`, else client `default_carrier_name`.
+- carrier name shown in Wix: `carrier_names` table (Mintsoft `CourierServiceId` → name, migration 0003, `PUT /admin/carriers`), else `CourierServiceName`, else courier map `carrier_display_name`, else client `default_carrier_name`.
 - Wix order id: `ExternalOrderReference`, else look up via `order_map` by Mintsoft order id.
 If no tracking number: **fulfil anyway, without tracking** (agreed 2026-11-15; replaces the original hold-with-`missing_tracking` rule).
 Courier name for Wix: payload courier name, else the courier map's `carrier_display_name` for the Wix shipping title, else client `default_carrier_name`.
@@ -339,11 +339,14 @@ Agreed: **fulfil per despatch.** In Mintsoft a split creates separate orders (`/
 ### 6.4 Cancellations
 Mintsoft `ExtraCode2` cancel webhook (`POST /webhooks/mintsoft/cancel/:slug?token=…`) → log to `error_log` with code `mintsoft_cancelled` for manual follow-up. Wix-side cancellations: out of scope v1, but F1 must never import an order whose Wix `status` is `CANCELED`.
 
-### 6.5 F3 — reconcile (cron `0 * * * *`)
-1. Per client: list Mintsoft orders despatched since `reconcile_since − 2h` (page through 100-cap; filter by ClientId client-side).
-2. For each with a matching `order_map` row not `fulfilled` → run pushTracking logic.
-3. Also retry `fulfil_failed` rows (max attempts 5, then leave for manual).
-4. Respect batch caps; advance `reconcile_since`.
+### 6.5 F3 — reconcile (cron `2-59/5 * * * *`, every 5 min, 2 min after the import)
+Agreed 2026-11-15: run every 5 minutes, not hourly. The Mintsoft webhook does fire, but about 10 min after despatch, and it's marked complete on any 200 we return, so a failure on our side is never retried by Mintsoft. Reconcile is the safety net.
+1. One `Order/List?SinceDespatchDate=<oldest client cursor − 2h>&SortOldestFirst=true` query (100/page, max 3 pages per run) covers all clients. Filter client-side to active clients' ClientIds.
+2. Act only on orders we imported (order_map match by ExternalOrderReference / Mintsoft ID / OrderNumber). This client's orders from other channels are ignored silently.
+3. Skip already fulfilled ones; otherwise run the same handling as the webhook (`handleDespatch`).
+4. Retry `failed` fulfilments (attempts < 5) with the budget left.
+5. Advance every client's `reconcile_since` to the newest DespatchDate processed (never past an order skipped for budget).
+6. The same cron purges `webhook_log` rows older than 14 days. Manual run: `POST /admin/reconcile`.
 
 ### 6.6 F4 — importProducts (admin, manual)
 `POST /admin/clients/:slug/import-products?dryRun=true|false&cursor=…&maxCreates=N` (dry run by default)
@@ -360,6 +363,8 @@ Mintsoft `ExtraCode2` cancel webhook (`POST /webhooks/mintsoft/cancel/:slug?toke
 - `PUT /admin/clients/:slug/courier-map` — upsert mappings.
 - `POST /admin/clients/:slug/import-products` — run F4, one page (§6.6).
 - `POST /admin/clients/:slug/run-import` — run F1 for one client now.
+- `POST /admin/reconcile` — run F3 now.
+- `GET` / `PUT /admin/carriers` — Mintsoft CourierServiceId → carrier name shown in Wix.
 - `POST /admin/clients/:slug/orders/:wixOrderNumber/retry` — retry a held/failed order.
 - `GET /admin/errors?unresolved=1` and `POST /admin/errors/:id/resolve`.
 - `GET /admin/health` — last run times per flow, counts by status.
@@ -368,7 +373,7 @@ Mintsoft `ExtraCode2` cancel webhook (`POST /webhooks/mintsoft/cancel/:slug?toke
 
 ## 7. Configuration & secrets
 
-`wrangler.jsonc` (or `.toml`): D1 binding `DB`, crons `["*/5 * * * *", "0 * * * *"]`, vars `MAX_ORDERS_PER_RUN=15`, `DEBUG_PAYLOADS=false`, `WORKER_BASE_URL`, `MINTSOFT_WRITES_ENABLED=false`, `MINTSOFT_ALLOWED_CLIENT_IDS=38`, `MINTSOFT_WAREHOUSE_ID=3`.
+`wrangler.jsonc` (or `.toml`): D1 binding `DB`, crons `["*/5 * * * *", "2-59/5 * * * *"]`, vars `MAX_ORDERS_PER_RUN=15`, `DEBUG_PAYLOADS=false`, `WORKER_BASE_URL`, `MINTSOFT_WRITES_ENABLED=false`, `MINTSOFT_ALLOWED_CLIENT_IDS=38`, `MINTSOFT_WAREHOUSE_ID=3`.
 
 ### 7.1 Mintsoft write guardrails
 Enforced in `src/adapters/mintsoft/client.ts` (every write goes through one guarded function):

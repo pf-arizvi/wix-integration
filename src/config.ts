@@ -8,7 +8,8 @@ import type { Env } from "./env";
 /** Cron expressions. Must match `triggers.crons` in wrangler.jsonc. */
 export const CRON = {
   IMPORT_ORDERS: "*/5 * * * *",
-  RECONCILE: "0 * * * *",
+  /** Every 5 min, offset 2 min from the import so each run gets its own budget. */
+  RECONCILE: "2-59/5 * * * *",
 } as const;
 
 /** Default cap on orders processed across all clients in one F1 run. */
@@ -39,6 +40,15 @@ export const ORDERS_CURSOR_OVERLAP_MS = 10 * 60 * 1000;
 
 /** F3: overlap subtracted from reconcile_since. */
 export const RECONCILE_OVERLAP_MS = 2 * 60 * 60 * 1000;
+
+/** Max Order/List pages (100 each) read per reconcile run; the rest continue next run. */
+export const RECONCILE_MAX_PAGES = 3;
+
+/** Max failed fulfilments retried per reconcile run. */
+export const RECONCILE_MAX_RETRIES = 5;
+
+/** Worst-case calls to push one despatch: items + Wix order + Wix fulfilments + create. */
+export const CALLS_PER_DESPATCH = 4;
 
 /** Held / fulfil_failed orders are retried automatically up to this many attempts. */
 export const MAX_AUTO_ATTEMPTS = 5;

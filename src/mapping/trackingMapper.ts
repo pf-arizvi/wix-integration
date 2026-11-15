@@ -27,6 +27,7 @@ export interface DespatchInfo {
   trackingNumber: string | null;
   trackingUrl: string | null;
   courierName: string | null;
+  courierServiceId: number | null;
   /** null = payload had no item list (fetch GET /api/Order/{id}/Items). */
   items: DespatchItem[] | null;
   /** Top-level keys that arrived (names only, never values) — for diagnosing renamed fields. */
@@ -68,7 +69,7 @@ export function parseDespatchPayload(payload: unknown): DespatchInfo {
   // Tolerate a wrapper like { Order: { ... } }.
   if (isObj(o) && isObj(pick(o, "Order")) && pick(o, "ID", "OrderId") === undefined) o = pick(o, "Order");
   if (!isObj(o)) {
-    return { mintsoftOrderId: null, mintsoftClientId: null, externalOrderReference: null, orderNumber: null, trackingNumber: null, trackingUrl: null, courierName: null, items: null, keys: [] };
+    return { mintsoftOrderId: null, mintsoftClientId: null, externalOrderReference: null, orderNumber: null, trackingNumber: null, trackingUrl: null, courierName: null, courierServiceId: null, items: null, keys: [] };
   }
   const courier = pick(o, "CourierService");
   const rawItems = pick(o, "OrderItems", "Items");
@@ -80,6 +81,7 @@ export function parseDespatchPayload(payload: unknown): DespatchInfo {
     trackingNumber: str(pick(o, "TrackingNumber", "TrackingNo", "TrackingCode")),
     trackingUrl: str(pick(o, "TrackingURL", "TrackingUrl", "TrackingLink")),
     courierName: str((isObj(courier) ? pick(courier, "Name") : undefined) ?? pick(o, "CourierServiceName", "CourierName")),
+    courierServiceId: int(pick(o, "CourierServiceId")),
     items: Array.isArray(rawItems) ? parseDespatchItems(rawItems) : null,
     keys: Object.keys(o).sort(),
   };

@@ -64,8 +64,27 @@ describe("admin auth", () => {
     ["POST", "/admin/clients/x/run-import"],
     ["POST", "/admin/clients/x/import-products"],
     ["GET", "/admin/mintsoft/courier-services"],
+    ["POST", "/admin/reconcile"],
+    ["GET", "/admin/carriers"],
+    ["PUT", "/admin/carriers"],
   ])("%s %s requires the admin token", async (method, path) => {
     expect((await call(path, { method, auth: false })).status).toBe(401);
+  });
+});
+
+describe("carrier names", () => {
+  it("upserts and lists Mintsoft service ID → carrier name", async () => {
+    const put = (carriers: unknown) => call("/admin/carriers", { method: "PUT", body: JSON.stringify({ carriers }) });
+    expect((await put([{ mintsoft_courier_service_id: 14, display_name: "Royal Mail" }, { mintsoft_courier_service_id: 1514, display_name: "Collection" }])).status).toBe(200);
+    const r = await put([{ mintsoft_courier_service_id: 1514, display_name: " Collection in person " }]);
+    expect(await r.json()).toEqual({
+      carriers: [
+        { mintsoftCourierServiceId: 14, displayName: "Royal Mail" },
+        { mintsoftCourierServiceId: 1514, displayName: "Collection in person" },
+      ],
+    });
+    expect((await put([{ mintsoft_courier_service_id: "14", display_name: "x" }])).status).toBe(400);
+    expect((await (await call("/admin/carriers")).json()) as unknown).toMatchObject({ carriers: [{ mintsoftCourierServiceId: 14 }, { mintsoftCourierServiceId: 1514 }] });
   });
 });
 

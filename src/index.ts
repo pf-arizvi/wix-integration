@@ -12,9 +12,12 @@ import { adminOnly, Router } from "./router";
 import {
   courierServicesHandler,
   createClientHandler,
+  listCarriersHandler,
+  putCarriersHandler,
   importProductsHandler,
   listClientsHandler,
   putCourierMapHandler,
+  reconcileHandler,
   runImportHandler,
 } from "./routes/admin";
 import { cancelWebhookHandler, despatchWebhookHandler } from "./routes/webhooks";
@@ -34,6 +37,9 @@ const router = new Router()
   .put("/admin/clients/:slug/courier-map", adminOnly(putCourierMapHandler))
   .post("/admin/clients/:slug/import-products", adminOnly(importProductsHandler))
   .post("/admin/clients/:slug/run-import", adminOnly(runImportHandler))
+  .post("/admin/reconcile", adminOnly(reconcileHandler))
+  .get("/admin/carriers", adminOnly(listCarriersHandler))
+  .put("/admin/carriers", adminOnly(putCarriersHandler))
   // Mintsoft webhooks: authenticated by the per-client token in the URL, not the admin token.
   .post("/webhooks/mintsoft/despatch/:slug", despatchWebhookHandler)
   .post("/webhooks/mintsoft/cancel/:slug", cancelWebhookHandler);

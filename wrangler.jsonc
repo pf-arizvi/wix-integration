@@ -18,7 +18,7 @@
   "triggers": {
     "crons": [
       "*/5 * * * *", // F1 importOrders
-      "0 * * * *"    // F3 reconcile
+      "2-59/5 * * * *" // F3 reconcile (+ webhook_log purge), 2 min after each import
     ]
   },
 

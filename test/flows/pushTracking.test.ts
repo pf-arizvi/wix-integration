@@ -80,6 +80,13 @@ describe("pushTracking — full despatch", () => {
     expect(await rows("SELECT status FROM fulfilments")).toEqual([{ status: "created" }]);
   });
 
+  it("names the carrier from carrier_names for the service actually used (real payload: name null, ID set)", async () => {
+    const { client, wix, deps } = await setup();
+    await env.DB.prepare("INSERT INTO carrier_names (mintsoft_courier_service_id, display_name) VALUES (1514, 'Collection in person')").run();
+    await handleDespatch(deps, client, payload({ CourierServiceName: null, CourierServiceId: 1514 }));
+    expect(wix.requests[0]!.req.fulfillment.trackingInfo!.shippingProvider).toBe("Collection in person");
+  });
+
   it("uses the courier map's display name when the payload has no courier", async () => {
     const { client, wix, deps } = await setup();
     await env.DB.prepare(

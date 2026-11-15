@@ -5,7 +5,7 @@
  *   findOrdersByNumber GET /api/Order/Search?OrderNumber=&exactMatch=true, ClientId filtered here
  * Never pass IncludeOrderItems=true (causes 400s).
  *
- * TODO(Phase 3): listDespatchedSince (Order/List, SinceDespatchDate, 100/page, filter ClientId client-side).
+ *   listDespatchedSince GET /api/Order/List?SinceDespatchDate=&SortOldestFirst=true (100/page)
  */
 import type { MintsoftApi } from "./client";
 import type { MintsoftNewOrder, MintsoftNewOrderResult, MintsoftOrder, MintsoftOrderItem } from "./types";
@@ -34,4 +34,23 @@ export async function getOrderItems(api: MintsoftApi, id: number): Promise<Mints
 export async function findOrdersByNumber(api: MintsoftApi, orderNumber: string, clientId: number): Promise<MintsoftOrder[]> {
   const res = await api.get<MintsoftOrder[] | undefined>("/api/Order/Search", { OrderNumber: orderNumber, exactMatch: true });
   return (Array.isArray(res) ? res : []).filter((o) => o.ClientId === clientId && o.OrderNumber === orderNumber);
+}
+
+/** Order/List hard cap. */
+export const ORDER_LIST_PAGE_SIZE = 100;
+
+/**
+ * Orders despatched since `since`, oldest first, ALL clients (the ClientId filter is ignored
+ * on warehouse-level keys — callers filter client-side). Never sends IncludeOrderItems (400s).
+ * VERIFY: SinceDespatchDate format/timezone; sent as "YYYY-MM-DDTHH:mm:ss" (no zone), with a
+ * 2h overlap on the caller side to absorb UK time vs UTC.
+ */
+export async function listDespatchedSince(api: MintsoftApi, since: string, pageNo: number): Promise<MintsoftOrder[]> {
+  const res = await api.get<MintsoftOrder[] | undefined>("/api/Order/List", {
+    SinceDespatchDate: since,
+    SortOldestFirst: true,
+    PageNo: pageNo,
+    Limit: ORDER_LIST_PAGE_SIZE,
+  });
+  return Array.isArray(res) ? res : [];
 }

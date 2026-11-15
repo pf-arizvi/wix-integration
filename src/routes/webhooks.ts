@@ -72,7 +72,7 @@ function webhook(source: "mintsoft_despatch" | "mintsoft_cancel", run: typeof ha
           clientId: client.id,
           flow: "pushTracking",
           ref: null,
-          code: "wix_api_error",
+          code: "internal_error",
           message: `${source} webhook failed: ${err instanceof Error ? err.message : String(err)}`,
         });
       } catch {

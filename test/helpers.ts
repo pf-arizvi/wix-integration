@@ -27,7 +27,7 @@ export function wixOrder(overrides: Partial<WixOrder> = {}): WixOrder {
 
 export async function resetDb(): Promise<void> {
   await env.DB.batch(
-    ["webhook_log", "error_log", "fulfilments", "sync_state", "order_map", "courier_map", "clients"].map((t) => env.DB.prepare(`DELETE FROM ${t}`)),
+    ["webhook_log", "error_log", "carrier_names", "fulfilments", "sync_state", "order_map", "courier_map", "clients"].map((t) => env.DB.prepare(`DELETE FROM ${t}`)),
   );
 }
 
@@ -86,6 +86,9 @@ export interface FakeWms extends WmsPort {
   courierServices: MintsoftCourierService[];
   /** Mintsoft order id → its items (GET /api/Order/{id}/Items). */
   orderItems: Record<number, MintsoftOrderItem[]>;
+  /** Orders returned by Order/List?SinceDespatchDate (all clients), oldest first. */
+  despatched: MintsoftOrder[];
+  listCalls: { since: string; page: number }[];
   /** serviceId → external names mapped to it. */
   courierNames: Record<number, MintsoftExternalCourierName[]>;
 }
@@ -108,6 +111,16 @@ export function fakeWms(opts: { writesEnabled?: boolean; skus?: string[] } = {})
       { ID: 3, Name: "Old Courier", ActiveB: false },
     ],
     orderItems: {},
+    despatched: [],
+    listCalls: [],
+    async listDespatchedSince(since, page) {
+      wms.listCalls.push({ since, page });
+      const from = Date.parse(`${since}Z`);
+      const all = wms.despatched
+        .filter((o) => Date.parse(`${o.DespatchDate}Z`) >= from)
+        .sort((a, b) => Date.parse(`${a.DespatchDate}Z`) - Date.parse(`${b.DespatchDate}Z`));
+      return all.slice((page - 1) * 100, page * 100);
+    },
     async getOrderItems(id) {
       return wms.orderItems[id] ?? [];
     },

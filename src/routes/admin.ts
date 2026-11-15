@@ -3,12 +3,14 @@
  * Handlers validate input and delegate to flows / db. No business logic here.
  */
 import { maxOrdersPerRun } from "../config";
-import { getClientBySlug, listClients, toPublicClient } from "../db/clients";
+import { getClientBySlug, listActiveClients, listClients, toPublicClient } from "../db/clients";
+import { type CarrierName, listCarrierNames, upsertCarrierNames } from "../db/carrierNames";
 import { listCourierRules, upsertCourierRules } from "../db/courierMap";
 import { createFlowDeps } from "../flows/deps";
 import { ImportConfigError, ImportHaltedError, importOrdersForClient } from "../flows/importOrders";
 import { importProductsPage } from "../flows/importProducts";
 import { inspectCourierMappings } from "../flows/inspectCouriers";
+import { reconcileOnce } from "../flows/reconcile";
 import { onboardClient, type OnboardInput } from "../flows/onboardClient";
 import type { FlowDeps } from "../flows/ports";
 import type { Env } from "../env";
@@ -112,6 +114,47 @@ export const courierServicesHandler: Handler = async ({ env, url }) => {
     return json({ ...result, subrequestsLeft: deps.budget.remaining });
   } catch (err) {
     if (err instanceof HttpError) return errorJson(502, "mintsoft_api_error", err.message);
+    throw err;
+  }
+};
+
+/** GET /admin/carriers — Mintsoft CourierServiceId → carrier name shown in Wix. */
+export const listCarriersHandler: Handler = async ({ env }) => json({ carriers: await listCarrierNames(env.DB) });
+
+/** PUT /admin/carriers  body: { carriers: [{ mintsoft_courier_service_id, display_name }] } (upsert). */
+export const putCarriersHandler: Handler = async ({ request, env }) => {
+  const body = await readJsonObject(request);
+  const list = body?.carriers;
+  if (!Array.isArray(list) || list.length === 0 || list.length > 100) {
+    return errorJson(400, "invalid_input", "carriers must be a non-empty array (max 100)");
+  }
+  let names: CarrierName[];
+  try {
+    names = list.map((m: unknown, i) => {
+      if (!m || typeof m !== "object") throw new BadInput(`carriers[${i}] must be an object`);
+      const o = m as Record<string, unknown>;
+      return {
+        mintsoftCourierServiceId: posInt(o, "mintsoft_courier_service_id", { required: true })!,
+        displayName: str(o, "display_name", { required: true, max: 100 })!,
+      };
+    });
+  } catch (err) {
+    if (err instanceof BadInput) return errorJson(400, "invalid_input", err.message);
+    throw err;
+  }
+  await upsertCarrierNames(env.DB, names);
+  return json({ carriers: await listCarrierNames(env.DB) });
+};
+
+/** POST /admin/reconcile — run reconcile now (same as the 5-minute cron). Writes to Wix only. */
+export const reconcileHandler: Handler = async ({ env }) => {
+  const deps = withDeps(env);
+  if (deps instanceof Response) return deps;
+  try {
+    const report = await reconcileOnce(deps, await listActiveClients(env.DB));
+    return json({ ...report, subrequestsLeft: deps.budget.remaining });
+  } catch (err) {
+    if (err instanceof HttpError) return errorJson(502, err.service === "wix" ? "wix_api_error" : "mintsoft_api_error", err.message);
     throw err;
   }
 };

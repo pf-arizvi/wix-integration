@@ -40,11 +40,12 @@ describe("scheduled", () => {
 });
 
 describe("migrations", () => {
-  it("creates all tables and indexes (SPEC §5 + 0002 fulfilments)", async () => {
+  it("creates all tables and indexes (SPEC §5 + 0002 fulfilments + 0003 carrier_names)", async () => {
     const { results } = await env.DB.prepare(
       "SELECT type, name FROM sqlite_master WHERE type IN ('table','index') AND name NOT LIKE 'sqlite_%' AND name NOT LIKE 'd1_%' AND name NOT LIKE '_cf_%' ORDER BY name",
     ).all<{ type: string; name: string }>();
     expect(results.map((r) => r.name)).toEqual([
+      "carrier_names",
       "clients",
       "courier_map",
       "error_log",

@@ -48,6 +48,8 @@ export interface WmsPort {
   createOrder(order: MintsoftNewOrder): Promise<MintsoftNewOrderResult>;
   getOrder(id: number): Promise<MintsoftOrder>;
   getOrderItems(id: number): Promise<MintsoftOrderItem[]>;
+  /** Despatched since `since` (all clients — filter by ClientId yourself). */
+  listDespatchedSince(since: string, pageNo: number): Promise<MintsoftOrder[]>;
   /** Guarded write (writes enabled + ClientId allowlisted), enforced in the adapter. */
   createProduct(product: MintsoftNewProduct): Promise<MintsoftNewProductResult>;
   getProduct(id: number): Promise<MintsoftProduct>;

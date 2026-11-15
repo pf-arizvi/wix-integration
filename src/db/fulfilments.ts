@@ -88,3 +88,21 @@ export async function saveFulfilmentOutcome(db: D1Database, o: FulfilmentOutcome
   if (o.error) stmts.push(recordErrorStatement(db, o.error));
   await db.batch(stmts);
 }
+
+/** Failed fulfilments still under the retry limit, oldest first. */
+export async function listRetryableFulfilments(db: D1Database, maxAttempts: number, limit: number): Promise<FulfilmentRecord[]> {
+  const { results } = await db
+    .prepare("SELECT * FROM fulfilments WHERE status = 'failed' AND attempts < ?1 ORDER BY updated_at LIMIT ?2")
+    .bind(maxAttempts, limit)
+    .all<Row>();
+  return results.map((r) => ({
+    clientId: r.client_id,
+    wixOrderId: r.wix_order_id,
+    mintsoftOrderId: r.mintsoft_order_id,
+    trackingNumber: r.tracking_number,
+    wixFulfillmentId: r.wix_fulfillment_id,
+    status: r.status,
+    lastError: r.last_error,
+    attempts: r.attempts,
+  }));
+}

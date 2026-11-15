@@ -157,6 +157,23 @@ curl -sS -X POST "$BASE/admin/clients/wix-test/run-import?dryRun=false" -H "Auth
 ### 5. Despatch → Wix fulfilment (automatic)
 When an order is despatched in Mintsoft, Mintsoft calls the despatch webhook registered on that order. The integration then creates a Wix fulfilment with the tracking number and link, which marks the order Fulfilled (or Partially Fulfilled for a split) and may send Wix's shipping email to the buyer. Untracked despatches are still fulfilled, without tracking. Mintsoft cancellations are logged as `mintsoft_cancelled` errors for manual follow-up. Nothing is written to Mintsoft.
 
+Mintsoft calls the webhook about 10 minutes after despatch. As a safety net, **reconcile** runs every 5 minutes (2 minutes after each import). It asks Mintsoft (read-only) which orders were despatched and fulfils any of ours that Wix doesn't have yet. Run it on demand with:
+```sh
+curl -sS -X POST "$BASE/admin/reconcile" -H "Authorization: Bearer $ADMIN_KEY" | python3 -m json.tool
+```
+
+**Carrier names shown in Wix.** Mintsoft's despatch says which courier service was used (`CourierServiceId`) but not its name. Map each service ID to the name customers should see:
+```sh
+curl -sS -X PUT "$BASE/admin/carriers" -H "Authorization: Bearer $ADMIN_KEY" -H "Content-Type: application/json" -d '{
+  "carriers": [
+    { "mintsoft_courier_service_id": 14,   "display_name": "Royal Mail" },
+    { "mintsoft_courier_service_id": 16,   "display_name": "Royal Mail" },
+    { "mintsoft_courier_service_id": 1514, "display_name": "Collection" }
+  ]
+}'
+```
+If a service has no entry, the name falls back to the courier map's `carrier_display_name`, then to the client's default carrier.
+
 To capture raw webhook payloads while testing (they contain addresses; purged after 14 days), switch logging on, then off again afterwards:
 ```sh
 npx wrangler deploy --var DEBUG_PAYLOADS:true

@@ -21,4 +21,5 @@ export type ErrorCode =
   | "mintsoft_client_not_allowed"
   | "mintsoft_client_mismatch"
   | "mintsoft_verify_failed"
-  | "config_error";
+  | "config_error"
+  | "internal_error";
