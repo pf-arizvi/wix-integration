@@ -1,0 +1,99 @@
+{
+  "id": "3887cf99-35e5-42d9-9be2-e6f98027845e",
+  "number": "10002",
+  "createdDate": "2026-11-15T11:54:36.155Z",
+  "updatedDate": "2026-11-15T11:55:07.542Z",
+  "lineItems": [
+    {
+      "id": "00000000-0000-0000-0000-000000000001",
+      "productName": { "original": "Black Bag", "translated": "Black Bag" },
+      "catalogReference": {
+        "catalogItemId": "70b564cd-d0d8-40da-9ef3-d853a796d719",
+        "appId": "215238eb-22a5-4c36-9e7b-e7c08025e04e",
+        "options": {
+          "options": { "Size": "Medium" },
+          "variantId": "683f7fa5-e730-4a19-b3c4-5c876e028d48"
+        }
+      },
+      "quantity": 2,
+      "descriptionLines": [
+        {
+          "name": { "original": "Size", "translated": "Size" },
+          "plainText": { "original": "Medium", "translated": "Medium" },
+          "lineType": "PLAIN_TEXT"
+        }
+      ],
+      "physicalProperties": { "sku": "BLKBAGMEDIUM", "shippable": true },
+      "itemType": { "preset": "PHYSICAL" },
+      "price": { "amount": "100.00", "formattedAmount": "£100.00" },
+      "totalPriceAfterTax": { "amount": "200.00", "formattedAmount": "£200.00" },
+      "paymentOption": "FULL_PAYMENT_ONLINE"
+    }
+  ],
+  "buyerInfo": {
+    "contactId": "d661dc55-405b-4434-990e-83eda9169183",
+    "email": "test.buyer@example.com"
+  },
+  "paymentStatus": "PAID",
+  "fulfillmentStatus": "NOT_FULFILLED",
+  "weightUnit": "KG",
+  "currency": "GBP",
+  "taxIncludedInPrices": false,
+  "priceSummary": {
+    "subtotal": { "amount": "200.00" },
+    "shipping": { "amount": "5.00" },
+    "tax": { "amount": "0.00" },
+    "discount": { "amount": "0.00" },
+    "total": { "amount": "205.00" }
+  },
+  "billingInfo": {
+    "address": {
+      "country": "GB",
+      "subdivision": "GB-ENG",
+      "city": "London",
+      "postalCode": "SW1A1AA",
+      "addressLine": "1 Test Street",
+      "countryFullname": "United Kingdom",
+      "subdivisionFullname": "England"
+    },
+    "contactDetails": { "firstName": "Test", "lastName": "Buyer", "phone": "+447700900000" }
+  },
+  "shippingInfo": {
+    "carrierId": "45c44b27-ca7b-4891-8c0d-1747d588b835",
+    "code": "2c6be8ac-677f-4f56-97df-d94b55c28548",
+    "title": "Express Shipping",
+    "logistics": {
+      "deliveryTime": "1-2 Business Days",
+      "shippingDestination": {
+        "address": {
+          "country": "GB",
+          "subdivision": "GB-ENG",
+          "city": "London",
+          "postalCode": "SW1A1AA",
+          "addressLine": "1 Test Street",
+          "countryFullname": "United Kingdom",
+          "subdivisionFullname": "England"
+        },
+        "contactDetails": { "firstName": "Test", "lastName": "Buyer", "phone": "+447700900000" }
+      }
+    },
+    "cost": { "price": { "amount": "5.00" } },
+    "region": { "name": "United Kingdom" }
+  },
+  "status": "APPROVED",
+  "archived": false,
+  "channelInfo": { "type": "WEB" },
+  "recipientInfo": {
+    "address": {
+      "country": "GB",
+      "subdivision": "GB-ENG",
+      "city": "London",
+      "postalCode": "SW1A1AA",
+      "addressLine": "1 Test Street",
+      "countryFullname": "United Kingdom",
+      "subdivisionFullname": "England"
+    },
+    "contactDetails": { "firstName": "Test", "lastName": "Buyer", "phone": "+447700900000" }
+  },
+  "purchasedDate": "2026-11-15T11:54:36.153Z"
+}
