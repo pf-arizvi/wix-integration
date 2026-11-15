@@ -31,8 +31,7 @@
     {
       "binding": "DB",
       "database_name": "wix-integration",
-      // Placeholder until `wrangler d1 create` is run. Local dev/tests work without it.
-      "database_id": "00000000-0000-0000-0000-000000000000",
+      "database_id": "3611a285-94a3-4492-b560-46fb0e3dc059",
       "migrations_dir": "migrations"
     }
   ]
