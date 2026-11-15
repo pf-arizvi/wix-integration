@@ -4,6 +4,7 @@
  */
 import { createMintsoftApi } from "../adapters/mintsoft/client";
 import { findClientById } from "../adapters/mintsoft/clients";
+import { listCourierExternalNames, listCourierServices } from "../adapters/mintsoft/couriers";
 import { createOrder, findOrdersByNumber, getOrder } from "../adapters/mintsoft/orders";
 import { createProduct, getProduct, lookupProductId } from "../adapters/mintsoft/products";
 import { getCatalogVersion, queryVariantsV3 } from "../adapters/wix/catalog";
@@ -33,6 +34,8 @@ export function createFlowDeps(env: Env, opts: { http?: HttpClient } = {}): Flow
     getOrder: (id) => getOrder(api, id),
     createProduct: (p) => createProduct(api, p),
     getProduct: (id) => getProduct(api, id),
+    listCourierServices: () => listCourierServices(api),
+    listCourierExternalNames: (id) => listCourierExternalNames(api, id),
   };
 
   const wixFor = async (client: ClientRecord): Promise<WixApi> =>

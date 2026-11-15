@@ -1,6 +1,8 @@
 import { env } from "cloudflare:workers";
 import type {
   MintsoftClient,
+  MintsoftCourierService,
+  MintsoftExternalCourierName,
   MintsoftNewOrder,
   MintsoftNewOrderResult,
   MintsoftNewProduct,
@@ -80,6 +82,9 @@ export interface FakeWms extends WmsPort {
   /** Simulate a lookup that never "sees" created products. */
   lookupIgnoresCreated?: boolean;
   clients: MintsoftClient[];
+  courierServices: MintsoftCourierService[];
+  /** serviceId → external names mapped to it. */
+  courierNames: Record<number, MintsoftExternalCourierName[]>;
 }
 
 export function fakeWms(opts: { writesEnabled?: boolean; skus?: string[] } = {}): FakeWms {
@@ -94,6 +99,18 @@ export function fakeWms(opts: { writesEnabled?: boolean; skus?: string[] } = {})
     products: [],
     createdProducts: [],
     clients: [{ ID: 38, Name: "Wix Test Client" }, { ID: 39, Name: "Someone Else" }],
+    courierServices: [
+      { ID: 16, Name: "Royal Mail 48", ActiveB: true },
+      { ID: 14, Name: "Royal Mail Tracked 24", ActiveB: true },
+      { ID: 3, Name: "Old Courier", ActiveB: false },
+    ],
+    courierNames: { 14: [{ ID: 1, CourierServiceId: 14, Name: "Express Shipping", Source: "Wix", ClientId: 38 }] },
+    async listCourierServices() {
+      return wms.courierServices;
+    },
+    async listCourierExternalNames(id) {
+      return wms.courierNames[id] ?? [];
+    },
     async findClientById(id) {
       return wms.clients.find((c) => c.ID === id) ?? null;
     },

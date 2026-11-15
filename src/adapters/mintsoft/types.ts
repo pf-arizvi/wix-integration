@@ -106,6 +106,27 @@ export interface MintsoftProduct {
   Weight?: number;
 }
 
+/** Swagger: CourierService. GET /api/Courier/Services. */
+export interface MintsoftCourierService {
+  ID: number;
+  Name?: string;
+  ActiveB?: boolean;
+  CourierServiceTypeId?: number;
+  TrackingURL?: string;
+}
+
+/**
+ * Swagger: ExternalCourierServiceName. GET /api/Courier/Services/{id}/ExternalNames.
+ * Mintsoft's own courier mapping: an external (channel) courier name → this service.
+ */
+export interface MintsoftExternalCourierName {
+  ID?: number;
+  CourierServiceId?: number;
+  Name?: string;
+  Source?: string;
+  ClientId?: number;
+}
+
 /** Swagger: Client (subset). GET /api/Client. */
 export interface MintsoftClient {
   ID: number;

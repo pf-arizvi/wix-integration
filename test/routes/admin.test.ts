@@ -37,6 +37,17 @@ function stubUpstreams() {
     if (url.pathname === "/api/Client") return res([{ ID: 38, Name: "Wix Test Client" }]);
     if (url.pathname === "/api/Order/Search") return res([]);
     if (url.pathname === "/api/Product/LookupProductId") return res(4567);
+    if (url.pathname === "/api/Courier/Services") {
+      return res([
+        { ID: 16, Name: "Royal Mail 48", ActiveB: true },
+        { ID: 14, Name: "Royal Mail Tracked 24", ActiveB: true },
+        { ID: 3, Name: "Old Courier", ActiveB: false },
+      ]);
+    }
+    if (url.pathname === "/api/Courier/Services/14/ExternalNames") {
+      return res([{ ID: 1, CourierServiceId: 14, Name: "Express Shipping", Source: "Wix", ClientId: 38 }]);
+    }
+    if (/^\/api\/Courier\/Services\/\d+\/ExternalNames$/.test(url.pathname)) return res([]);
     return res({ message: "unexpected" }, 418);
   });
   return calls;
@@ -52,8 +63,35 @@ describe("admin auth", () => {
     ["PUT", "/admin/clients/x/courier-map"],
     ["POST", "/admin/clients/x/run-import"],
     ["POST", "/admin/clients/x/import-products"],
+    ["GET", "/admin/mintsoft/courier-services"],
   ])("%s %s requires the admin token", async (method, path) => {
     expect((await call(path, { method, auth: false })).status).toBe(401);
+  });
+});
+
+describe("GET /admin/mintsoft/courier-services", () => {
+  it("lists active services with their mapped external names, read-only", async () => {
+    const calls = stubUpstreams();
+    const r = await call("/admin/mintsoft/courier-services");
+    expect(r.status).toBe(200);
+    expect(await r.json()).toMatchObject({
+      totalServices: 3,
+      activeServices: 2,
+      nextOffset: null,
+      services: [
+        { id: 14, name: "Royal Mail Tracked 24", active: true, externalNames: [{ name: "Express Shipping", source: "Wix", clientId: 38 }] },
+        { id: 16, name: "Royal Mail 48", active: true, externalNames: [] },
+      ],
+    });
+    expect(calls.every((c) => c.method === "GET")).toBe(true);
+  });
+
+  it("pages by offset and validates input", async () => {
+    stubUpstreams();
+    const r = (await (await call("/admin/mintsoft/courier-services?limit=1")).json()) as { services: { id: number }[]; nextOffset: number };
+    expect(r.services.map((s) => s.id)).toEqual([14]);
+    expect(r.nextOffset).toBe(1);
+    expect((await call("/admin/mintsoft/courier-services?limit=41")).status).toBe(400);
   });
 });
 

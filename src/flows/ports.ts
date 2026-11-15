@@ -4,6 +4,8 @@
  */
 import type {
   MintsoftClient,
+  MintsoftCourierService,
+  MintsoftExternalCourierName,
   MintsoftNewOrder,
   MintsoftNewOrderResult,
   MintsoftNewProduct,
@@ -39,6 +41,8 @@ export interface WmsPort {
   /** Guarded write (writes enabled + ClientId allowlisted), enforced in the adapter. */
   createProduct(product: MintsoftNewProduct): Promise<MintsoftNewProductResult>;
   getProduct(id: number): Promise<MintsoftProduct>;
+  listCourierServices(): Promise<MintsoftCourierService[]>;
+  listCourierExternalNames(serviceId: number): Promise<MintsoftExternalCourierName[]>;
 }
 
 export interface FlowDeps {

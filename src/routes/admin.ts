@@ -8,6 +8,7 @@ import { listCourierRules, upsertCourierRules } from "../db/courierMap";
 import { createFlowDeps } from "../flows/deps";
 import { ImportConfigError, ImportHaltedError, importOrdersForClient } from "../flows/importOrders";
 import { importProductsPage } from "../flows/importProducts";
+import { inspectCourierMappings } from "../flows/inspectCouriers";
 import { onboardClient, type OnboardInput } from "../flows/onboardClient";
 import type { FlowDeps } from "../flows/ports";
 import type { Env } from "../env";
@@ -92,6 +93,27 @@ export const createClientHandler: Handler = async ({ request, env }) => {
   if (!result.ok) return errorJson(result.status, result.error, result.message);
   log.info("admin.client_created", { client: result.client.slug, mintsoftClientId: result.client.mintsoftClientId });
   return json({ client: result.client, mintsoft_client: result.mintsoftClient, webhooks: result.webhooks }, 201);
+};
+
+/**
+ * GET /admin/mintsoft/courier-services?offset=0&limit=40&includeInactive=false
+ * Read-only: Mintsoft courier services + the external names mapped to each.
+ */
+export const courierServicesHandler: Handler = async ({ env, url }) => {
+  const offset = Number(url.searchParams.get("offset") ?? "0");
+  const limit = Number(url.searchParams.get("limit") ?? "40");
+  if (!Number.isInteger(offset) || offset < 0 || !Number.isInteger(limit) || limit < 1 || limit > 40) {
+    return errorJson(400, "invalid_input", "offset must be >= 0 and limit 1-40");
+  }
+  const deps = withDeps(env);
+  if (deps instanceof Response) return deps;
+  try {
+    const result = await inspectCourierMappings(deps, { offset, limit, includeInactive: url.searchParams.get("includeInactive") === "true" });
+    return json({ ...result, subrequestsLeft: deps.budget.remaining });
+  } catch (err) {
+    if (err instanceof HttpError) return errorJson(502, "mintsoft_api_error", err.message);
+    throw err;
+  }
 };
 
 /** GET /admin/clients — never returns keys or webhook tokens. */

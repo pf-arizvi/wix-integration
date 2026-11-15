@@ -9,7 +9,14 @@ import { runReconcile } from "./flows/reconcile";
 import { log } from "./lib/log";
 import { errorJson, json } from "./lib/response";
 import { adminOnly, Router } from "./router";
-import { createClientHandler, importProductsHandler, listClientsHandler, putCourierMapHandler, runImportHandler } from "./routes/admin";
+import {
+  courierServicesHandler,
+  createClientHandler,
+  importProductsHandler,
+  listClientsHandler,
+  putCourierMapHandler,
+  runImportHandler,
+} from "./routes/admin";
 
 const router = new Router()
   // Unauthenticated liveness probe. Touches nothing, returns no data.
@@ -21,6 +28,7 @@ const router = new Router()
   )
   .post("/admin/clients", adminOnly(createClientHandler))
   .get("/admin/clients", adminOnly(listClientsHandler))
+  .get("/admin/mintsoft/courier-services", adminOnly(courierServicesHandler))
   .put("/admin/clients/:slug/courier-map", adminOnly(putCourierMapHandler))
   .post("/admin/clients/:slug/import-products", adminOnly(importProductsHandler))
   .post("/admin/clients/:slug/run-import", adminOnly(runImportHandler));
