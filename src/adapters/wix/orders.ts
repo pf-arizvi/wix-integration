@@ -39,6 +39,15 @@ export function buildPaidUnfulfilledSearch(opts: SearchPaidUnfulfilledOptions): 
   };
 }
 
+/** GET /ecom/v1/orders/{id} → { order }. */
+export async function getOrder(api: WixApi, wixOrderId: string): Promise<WixOrder> {
+  const res = await api.request<{ order?: WixOrder } | undefined>("GET", `/ecom/v1/orders/${encodeURIComponent(wixOrderId)}`, undefined, {
+    idempotent: true,
+  });
+  if (!res?.order) throw new Error(`Wix GET order ${wixOrderId} returned no order`);
+  return res.order;
+}
+
 export async function searchPaidUnfulfilledOrders(api: WixApi, opts: SearchPaidUnfulfilledOptions): Promise<OrdersPage> {
   const res = await api.request<WixSearchOrdersResponse | undefined>(
     "POST",

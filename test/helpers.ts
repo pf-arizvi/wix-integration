@@ -8,14 +8,15 @@ import type {
   MintsoftNewProduct,
   MintsoftNewProductResult,
   MintsoftOrder,
+  MintsoftOrderItem,
   MintsoftProduct,
 } from "../src/adapters/mintsoft/types";
 import { checkWriteAllowed } from "../src/adapters/mintsoft/client";
 import type { CatalogVersion } from "../src/adapters/wix/catalog";
-import type { WixOrder, WixReadOnlyVariant } from "../src/adapters/wix/types";
+import type { WixCreateFulfillmentRequest, WixFulfillment, WixOrder, WixReadOnlyVariant } from "../src/adapters/wix/types";
 import { createClient, type ClientRecord } from "../src/db/clients";
 import { setSyncState } from "../src/db/syncState";
-import type { CatalogSourcePort, FlowDeps, OrderSourcePort, WmsPort } from "../src/flows/ports";
+import type { CatalogSourcePort, FlowDeps, FulfilmentTargetPort, OrderSourcePort, WmsPort } from "../src/flows/ports";
 import { SubrequestBudget } from "../src/lib/http";
 import fixture from "./fixtures/wix-order-paid.json";
 
@@ -26,7 +27,7 @@ export function wixOrder(overrides: Partial<WixOrder> = {}): WixOrder {
 
 export async function resetDb(): Promise<void> {
   await env.DB.batch(
-    ["webhook_log", "error_log", "sync_state", "order_map", "courier_map", "clients"].map((t) => env.DB.prepare(`DELETE FROM ${t}`)),
+    ["webhook_log", "error_log", "fulfilments", "sync_state", "order_map", "courier_map", "clients"].map((t) => env.DB.prepare(`DELETE FROM ${t}`)),
   );
 }
 
@@ -83,6 +84,8 @@ export interface FakeWms extends WmsPort {
   lookupIgnoresCreated?: boolean;
   clients: MintsoftClient[];
   courierServices: MintsoftCourierService[];
+  /** Mintsoft order id → its items (GET /api/Order/{id}/Items). */
+  orderItems: Record<number, MintsoftOrderItem[]>;
   /** serviceId → external names mapped to it. */
   courierNames: Record<number, MintsoftExternalCourierName[]>;
 }
@@ -104,6 +107,10 @@ export function fakeWms(opts: { writesEnabled?: boolean; skus?: string[] } = {})
       { ID: 14, Name: "Royal Mail Tracked 24", ActiveB: true },
       { ID: 3, Name: "Old Courier", ActiveB: false },
     ],
+    orderItems: {},
+    async getOrderItems(id) {
+      return wms.orderItems[id] ?? [];
+    },
     courierNames: { 14: [{ ID: 1, CourierServiceId: 14, Name: "Express Shipping", Source: "Wix", ClientId: 38 }] },
     async listCourierServices() {
       return wms.courierServices;
@@ -190,16 +197,61 @@ export function variant(sku: string | undefined, overrides: Partial<WixReadOnlyV
   };
 }
 
+/** In-memory Wix fulfilments: enforces remaining quantities and duplicate tracking numbers like Wix does. */
+export interface FakeWix extends FulfilmentTargetPort {
+  orders: Map<string, WixOrder>;
+  fulfilments: Map<string, WixFulfillment[]>;
+  requests: { orderId: string; req: WixCreateFulfillmentRequest }[];
+  failNextCreate?: Error;
+}
+
+export function fakeWix(orders: WixOrder[] = [wixOrder()]): FakeWix {
+  let n = 0;
+  const wix: FakeWix = {
+    orders: new Map(orders.map((o) => [o.id, o])),
+    fulfilments: new Map(),
+    requests: [],
+    async getOrder(id) {
+      const o = wix.orders.get(id);
+      if (!o) throw new Error(`wix order ${id} not found`);
+      return structuredClone(o);
+    },
+    async listFulfilments(id) {
+      return structuredClone(wix.fulfilments.get(id) ?? []);
+    },
+    async createFulfilment(id, req) {
+      if (wix.failNextCreate) {
+        const e = wix.failNextCreate;
+        wix.failNextCreate = undefined;
+        throw e;
+      }
+      wix.requests.push({ orderId: id, req });
+      const list = wix.fulfilments.get(id) ?? [];
+      const t = req.fulfillment.trackingInfo;
+      if (t && list.some((f) => f.trackingInfo?.trackingNumber === t.trackingNumber && f.trackingInfo?.shippingProvider === t.shippingProvider)) {
+        return { status: "already_exists" as const };
+      }
+      const fid = `f-${++n}`;
+      list.push({ id: fid, lineItems: req.fulfillment.lineItems, ...(t ? { trackingInfo: t } : {}) });
+      wix.fulfilments.set(id, list);
+      return { status: "created" as const, fulfillmentId: fid };
+    },
+  };
+  return wix;
+}
+
 export function fakeDeps(
   source: OrderSourcePort,
   wms: WmsPort,
   budget = new SubrequestBudget(),
   catalog: CatalogSourcePort = fakeCatalog([]),
+  wix: FulfilmentTargetPort = fakeWix(),
 ): FlowDeps {
   return {
     db: env.DB,
     budget,
     wms,
+    fulfilmentTargetFor: async () => wix,
     catalogSourceFor: async () => catalog,
     orderSourceFor: async () => source,
     orderSourceFromCredentials: () => source,

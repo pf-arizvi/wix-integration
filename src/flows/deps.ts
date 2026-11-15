@@ -5,11 +5,12 @@
 import { createMintsoftApi } from "../adapters/mintsoft/client";
 import { findClientById } from "../adapters/mintsoft/clients";
 import { listCourierExternalNames, listCourierServices } from "../adapters/mintsoft/couriers";
-import { createOrder, findOrdersByNumber, getOrder } from "../adapters/mintsoft/orders";
+import { createOrder, findOrdersByNumber, getOrder, getOrderItems } from "../adapters/mintsoft/orders";
+import { createFulfilment, listFulfilments } from "../adapters/wix/fulfilments";
 import { createProduct, getProduct, lookupProductId } from "../adapters/mintsoft/products";
 import { getCatalogVersion, queryVariantsV3 } from "../adapters/wix/catalog";
 import { createWixApi, type WixApi } from "../adapters/wix/client";
-import { searchPaidUnfulfilledOrders } from "../adapters/wix/orders";
+import { getOrder as getWixOrder, searchPaidUnfulfilledOrders } from "../adapters/wix/orders";
 import { allowedMintsoftClientIds, mintsoftWarehouseId, mintsoftWritesEnabled } from "../config";
 import type { ClientRecord } from "../db/clients";
 import type { Env } from "../env";
@@ -32,6 +33,7 @@ export function createFlowDeps(env: Env, opts: { http?: HttpClient } = {}): Flow
     lookupProductId: (sku, c) => lookupProductId(api, sku, c),
     createOrder: (o) => createOrder(api, o),
     getOrder: (id) => getOrder(api, id),
+    getOrderItems: (id) => getOrderItems(api, id),
     createProduct: (p) => createProduct(api, p),
     getProduct: (id) => getProduct(api, id),
     listCourierServices: () => listCourierServices(api),
@@ -53,6 +55,14 @@ export function createFlowDeps(env: Env, opts: { http?: HttpClient } = {}): Flow
     wms,
     orderSourceFor: async (client) => orderSource(await wixFor(client)),
     catalogSourceFor: async (client) => catalogSource(await wixFor(client)),
+    fulfilmentTargetFor: async (client) => {
+      const wix = await wixFor(client);
+      return {
+        getOrder: (id) => getWixOrder(wix, id),
+        listFulfilments: (id) => listFulfilments(wix, id),
+        createFulfilment: (id, req) => createFulfilment(wix, id, req),
+      };
+    },
     orderSourceFromCredentials: (apiKey, siteId) => orderSource(createWixApi(http, { apiKey, siteId })),
     workerBaseUrl: env.WORKER_BASE_URL,
     encryptionKey: env.ENCRYPTION_KEY,

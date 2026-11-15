@@ -154,6 +154,15 @@ curl -sS -X POST "$BASE/admin/clients/wix-test/run-import" -H "Authorization: Be
 curl -sS -X POST "$BASE/admin/clients/wix-test/run-import?dryRun=false" -H "Authorization: Bearer $ADMIN_KEY" | python3 -m json.tool
 ```
 
+### 5. Despatch → Wix fulfilment (automatic)
+When an order is despatched in Mintsoft, Mintsoft calls the despatch webhook registered on that order. The integration then creates a Wix fulfilment with the tracking number and link, which marks the order Fulfilled (or Partially Fulfilled for a split) and may send Wix's shipping email to the buyer. Untracked despatches are still fulfilled, without tracking. Mintsoft cancellations are logged as `mintsoft_cancelled` errors for manual follow-up. Nothing is written to Mintsoft.
+
+To capture raw webhook payloads while testing (they contain addresses; purged after 14 days), switch logging on, then off again afterwards:
+```sh
+npx wrangler deploy --var DEBUG_PAYLOADS:true
+npm run deploy
+```
+
 List clients (never shows keys or webhook tokens):
 ```sh
 curl -sS "$BASE/admin/clients" -H "Authorization: Bearer $ADMIN_KEY"

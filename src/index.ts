@@ -17,6 +17,8 @@ import {
   putCourierMapHandler,
   runImportHandler,
 } from "./routes/admin";
+import { cancelWebhookHandler, despatchWebhookHandler } from "./routes/webhooks";
+import { purgeWebhookLog } from "./db/webhookLog";
 
 const router = new Router()
   // Unauthenticated liveness probe. Touches nothing, returns no data.
@@ -31,8 +33,10 @@ const router = new Router()
   .get("/admin/mintsoft/courier-services", adminOnly(courierServicesHandler))
   .put("/admin/clients/:slug/courier-map", adminOnly(putCourierMapHandler))
   .post("/admin/clients/:slug/import-products", adminOnly(importProductsHandler))
-  .post("/admin/clients/:slug/run-import", adminOnly(runImportHandler));
-// TODO(Phase 2): POST /webhooks/mintsoft/despatch/:slug
+  .post("/admin/clients/:slug/run-import", adminOnly(runImportHandler))
+  // Mintsoft webhooks: authenticated by the per-client token in the URL, not the admin token.
+  .post("/webhooks/mintsoft/despatch/:slug", despatchWebhookHandler)
+  .post("/webhooks/mintsoft/cancel/:slug", cancelWebhookHandler);
 // TODO(Phase 3): /admin/clients/:slug/orders/:wixOrderNumber/retry, /admin/errors*, full /admin/health
 export default {
   async fetch(request, env, ctx): Promise<Response> {
@@ -51,9 +55,13 @@ export default {
         case CRON.IMPORT_ORDERS:
           await runImportOrders(env, ctx);
           break;
-        case CRON.RECONCILE:
+        case CRON.RECONCILE: {
+          // Raw webhook payloads hold personal data: purge after 14 days.
+          const purged = await purgeWebhookLog(env.DB);
+          if (purged) log.info("webhookLog.purged", { rows: purged });
           await runReconcile(env, ctx);
           break;
+        }
         default:
           log.warn("cron.unknown", { cron: controller.cron });
           return;

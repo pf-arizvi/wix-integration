@@ -13,6 +13,9 @@ export type ErrorCode =
   | "missing_tracking"
   | "order_not_found"
   | "mintsoft_cancelled"
+  | "order_cancelled"
+  | "despatch_mismatch"
+  | "despatch_payload_invalid"
   // Guardrails
   | "mintsoft_writes_disabled"
   | "mintsoft_client_not_allowed"

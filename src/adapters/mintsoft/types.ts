@@ -6,9 +6,8 @@
 
 /** Swagger: NewOrderConnectAction. Registers webhooks on an order. */
 export interface MintsoftConnectAction {
-  // VERIFY: "API" is the documented Type for ASN webhooks
-  // (PUT /api/ASN/{id}/ConnectActions: "Type = API, ExtraCode1 = Callback Url,
-  // ExtraCode4 = Auth Header Values, Complete = false"). Assumed the same for orders.
+  // "API" (as documented for ASN webhooks). Confirmed accepted for orders: the
+  // connect action with our despatch URL appears on Mintsoft order 41233.
   Type: string;
   SourceOrderId?: string;
   Complete: boolean;
@@ -62,6 +61,14 @@ export interface MintsoftNewOrderResult {
   OrderStatusId?: number;
   OrderStatus?: string;
   Message?: string;
+}
+
+/** Swagger: OrderItem (subset). */
+export interface MintsoftOrderItem {
+  ID?: number;
+  OrderId?: number;
+  SKU?: string;
+  Quantity?: number;
 }
 
 /** Swagger: Order (subset). GET /api/Order/{id}, GET /api/Order/Search. */

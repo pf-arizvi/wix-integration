@@ -73,6 +73,42 @@ export interface WixOrder {
   };
 }
 
+/** eCom Order Fulfillments (subset). */
+export interface WixFulfillmentLineItem {
+  id: string;
+  quantity?: number;
+}
+
+export interface WixFulfillmentTrackingInfo {
+  trackingNumber: string;
+  shippingProvider: string;
+  trackingLink?: string;
+}
+
+export interface WixFulfillment {
+  id?: string;
+  createdDate?: string;
+  lineItems?: WixFulfillmentLineItem[];
+  trackingInfo?: WixFulfillmentTrackingInfo;
+  customInfo?: { fieldsData?: Record<string, string> };
+  /** false = doesn't count towards fulfilled quantities. Unset counts as fulfilled. */
+  completed?: boolean;
+}
+
+/** Body of POST /ecom/v1/fulfillments/orders/{orderId}/create-fulfillment. lineItems (with ids) are REQUIRED. */
+export interface WixCreateFulfillmentRequest {
+  fulfillment: {
+    lineItems: WixFulfillmentLineItem[];
+    trackingInfo?: WixFulfillmentTrackingInfo;
+    customInfo?: { fieldsData: Record<string, string> };
+  };
+}
+
+export interface WixOrderWithFulfillments {
+  orderWithFulfillments?: { orderId?: string; fulfillments?: WixFulfillment[] };
+  fulfillmentId?: string;
+}
+
 /**
  * Catalog V3 Read-Only Variant (subset).
  * https://dev.wix.com/docs/api-reference/business-solutions/stores/catalog-v3/read-only-variants-v3/query-variants

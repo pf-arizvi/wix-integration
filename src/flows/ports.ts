@@ -11,15 +11,24 @@ import type {
   MintsoftNewProduct,
   MintsoftNewProductResult,
   MintsoftOrder,
+  MintsoftOrderItem,
   MintsoftProduct,
 } from "../adapters/mintsoft/types";
 import type { CatalogVersion, VariantsPage } from "../adapters/wix/catalog";
+import type { CreateFulfilmentResult } from "../adapters/wix/fulfilments";
+import type { WixCreateFulfillmentRequest, WixFulfillment, WixOrder } from "../adapters/wix/types";
 import type { OrdersPage, SearchPaidUnfulfilledOptions } from "../adapters/wix/orders";
 import type { ClientRecord } from "../db/clients";
 import type { SubrequestBudget } from "../lib/http";
 
 export interface OrderSourcePort {
   searchPaidUnfulfilled(opts: SearchPaidUnfulfilledOptions): Promise<OrdersPage>;
+}
+
+export interface FulfilmentTargetPort {
+  getOrder(wixOrderId: string): Promise<WixOrder>;
+  listFulfilments(wixOrderId: string): Promise<WixFulfillment[]>;
+  createFulfilment(wixOrderId: string, req: WixCreateFulfillmentRequest): Promise<CreateFulfilmentResult>;
 }
 
 export interface CatalogSourcePort {
@@ -38,6 +47,7 @@ export interface WmsPort {
   /** Guarded write (writes enabled + ClientId allowlisted), enforced in the adapter. */
   createOrder(order: MintsoftNewOrder): Promise<MintsoftNewOrderResult>;
   getOrder(id: number): Promise<MintsoftOrder>;
+  getOrderItems(id: number): Promise<MintsoftOrderItem[]>;
   /** Guarded write (writes enabled + ClientId allowlisted), enforced in the adapter. */
   createProduct(product: MintsoftNewProduct): Promise<MintsoftNewProductResult>;
   getProduct(id: number): Promise<MintsoftProduct>;
@@ -53,6 +63,8 @@ export interface FlowDeps {
   orderSourceFor(client: ClientRecord): Promise<OrderSourcePort>;
   /** Catalog source for a stored client (decrypts its Wix key). */
   catalogSourceFor(client: ClientRecord): Promise<CatalogSourcePort>;
+  /** Wix fulfilment target for a stored client (decrypts its Wix key). */
+  fulfilmentTargetFor(client: ClientRecord): Promise<FulfilmentTargetPort>;
   /** Order source from raw credentials (onboarding test call). */
   orderSourceFromCredentials(apiKey: string, siteId: string): OrderSourcePort;
   workerBaseUrl: string;

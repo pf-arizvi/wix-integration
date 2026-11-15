@@ -110,7 +110,8 @@ Each client creates the API key in **their own** Wix account (keys only work on 
 |---|---|---|
 | Search orders | `POST /ecom/v1/orders/search` | Body below. Cursor paging. |
 | Create fulfilment | `POST /ecom/v1/fulfillments/orders/{wixOrderId}/create-fulfillment` | Uses Wix order **id** (UUID), not `number`. 409 `TRACKING_NUMBER_ALREADY_EXISTS` = already done → treat as success. |
-| List fulfilments for order | `List Fulfillments for Single Order` | VERIFY exact path in docs. Used for idempotency in F3. |
+| List fulfilments for order | `GET /ecom/v1/fulfillments/orders/{wixOrderId}` | Used to compute remaining unfulfilled quantities (partials, idempotency). |
+| Get order | `GET /ecom/v1/orders/{wixOrderId}` | Line item ids + status before fulfilling. |
 | Catalog version | `GET /stores/v3/provision/version` | Returns `catalogVersion`: `V1_CATALOG` / `V3_CATALOG` / `STORES_NOT_INSTALLED`. Site uses one or the other — wrong version = calls fail. |
 | Variants (Catalog V3) | `POST /stores/v3/products/query-variants` | Variant-centric, up to 1,000 per request. Weight only returned when `fields` includes `WEIGHT_MEASUREMENT_UNIT_INFO`. Follow-up pages send cursor only. |
 | Products (Catalog V1) | `POST /stores/v1/products/query` | Variants nested in product. VERIFY. Not built yet (no V1 test site); V1 sites are refused with a clear error. |
@@ -132,21 +133,23 @@ Order search body (F1):
 ```
 Confirmed working on the dev site (returns only paid + unfulfilled). `$eq` syntax confirmed.
 
-Fulfilment body (F2) — VERIFY shape against docs:
+Fulfilment body (F2), confirmed against the Wix docs:
 ```json
 {
   "fulfillment": {
     "lineItems": [{ "id": "<wix lineItem id>", "quantity": 2 }],
     "trackingInfo": {
       "trackingNumber": "AB123456789GB",
-      "shippingProvider": "Royal Mail",
+      "shippingProvider": "Royal Mail Tracked 24",
       "trackingLink": "https://..."
     }
   }
 }
 ```
-- If `lineItems` is omitted, Wix fulfils the remaining unfulfilled quantity. v1: omit `lineItems` for full despatch; send explicit lines only for partial despatch (§6.3).
-- UK carriers are mostly not Wix "predefined" providers → pass a custom provider name AND `trackingLink` (from Mintsoft).
+- **`lineItems` (with ids) is required.** An omitted `quantity` defaults to the remaining unfulfilled quantity. The SPEC's original "omit lineItems for full despatch" doesn't work, so we always read the Wix order for its line ids.
+- `trackingNumber` + `shippingProvider` are required together. UK carriers are not Wix predefined providers, so we pass the courier name and `trackingLink` (from Mintsoft).
+- Untracked despatch: no `trackingInfo`; `customInfo` is sent instead (VERIFY Wix accepts it).
+- Order must be `status: APPROVED`. Creating a fulfilment may trigger Wix's shipping email to the buyer (site email settings).
 
 ### 3.2 Mintsoft (base `https://api.mintsoft.co.uk`)
 Auth: `ms-apikey: <MINTSOFT_API_KEY>` (one warehouse-level key, Worker secret).
@@ -205,7 +208,8 @@ Payload = Mintsoft order JSON (same as `GET /api/Order/{id}`). Exact field names
 - tracking URL: try `TrackingURL` / `TrackingUrl`.
 - courier name: try `CourierService.Name`, `CourierServiceName`, else client `default_carrier_name`.
 - Wix order id: `ExternalOrderReference`, else look up via `order_map` by Mintsoft order id.
-If no tracking number: still create the fulfilment without tracking? → **No.** Hold with error `missing_tracking` (operational decision; ask before changing).
+If no tracking number: **fulfil anyway, without tracking** (agreed 2026-11-15; replaces the original hold-with-`missing_tracking` rule).
+Courier name for Wix: payload courier name, else the courier map's `carrier_display_name` for the Wix shipping title, else client `default_carrier_name`.
 
 ### 4.3 Wix variant → Mintsoft product (`mapping/productMapper.ts`)
 | Mintsoft | Wix (V3 variant) | Rule |
@@ -284,6 +288,8 @@ CREATE TABLE error_log (
   created_at            TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
+-- migration 0002 adds `fulfilments` (one row per despatched Mintsoft order; see §6.3).
+
 CREATE TABLE webhook_log (                             -- only written when DEBUG_PAYLOADS=true; purge >14 days
   id                    INTEGER PRIMARY KEY AUTOINCREMENT,
   client_id             INTEGER,
@@ -324,10 +330,14 @@ For each active client, until `MAX_ORDERS_PER_RUN` (15) orders processed in tota
 7. Always return 200 to Mintsoft once the request is authenticated and logged (avoid retry storms); failures are retried by F3.
 
 ### 6.3 Partial despatch / split orders
-Mintsoft can split orders. v1 behaviour: if the despatch payload contains item-level quantities that are less than the Wix order quantities, send explicit `lineItems` with despatched quantities (match by SKU → Wix line item id). Otherwise omit `lineItems`. **Flag this area with `// VERIFY:`** and ask me before finalising — needs testing with a real split in Mintsoft.
+Agreed: **fulfil per despatch.** In Mintsoft a split creates separate orders (`/api/Order/{id}/Splits`), each with its own items and its own despatch webhook.
+- The items despatched come from the payload `OrderItems`, else `GET /api/Order/{id}/Items`. They're matched to Wix line items by SKU and capped at each line's remaining unfulfilled quantity (Wix fulfilments list).
+- Every despatch creates its own fulfilment with its own tracking. order_map becomes `despatched` while partial, then `fulfilled` when nothing remains.
+- Idempotency: the `fulfilments` table (migration 0002) has one row per Mintsoft order ID, plus the remaining-quantity cap, plus Wix's 409 on a duplicate tracking number.
+- VERIFY with a real split: that split parts carry `ExternalOrderReference`. Matching falls back to Mintsoft order ID, then OrderNumber.
 
 ### 6.4 Cancellations
-Mintsoft `ExtraCode2` cancel webhook → log to `error_log` with code `mintsoft_cancelled` for manual follow-up. Wix-side cancellations: out of scope v1, but F1 must never import an order whose Wix `status` is `CANCELED`.
+Mintsoft `ExtraCode2` cancel webhook (`POST /webhooks/mintsoft/cancel/:slug?token=…`) → log to `error_log` with code `mintsoft_cancelled` for manual follow-up. Wix-side cancellations: out of scope v1, but F1 must never import an order whose Wix `status` is `CANCELED`.
 
 ### 6.5 F3 — reconcile (cron `0 * * * *`)
 1. Per client: list Mintsoft orders despatched since `reconcile_since − 2h` (page through 100-cap; filter by ClientId client-side).

@@ -59,6 +59,19 @@ export async function getOrderMapsByWixIds(db: D1Database, clientId: number, wix
   return out;
 }
 
+export async function getOrderMapByWixId(db: D1Database, clientId: number, wixOrderId: string): Promise<OrderMapRecord | null> {
+  const row = await db.prepare("SELECT * FROM order_map WHERE client_id = ?1 AND wix_order_id = ?2").bind(clientId, wixOrderId).first<Row>();
+  return row ? toRecord(row) : null;
+}
+
+export async function getOrderMapByMintsoftId(db: D1Database, clientId: number, mintsoftOrderId: number): Promise<OrderMapRecord | null> {
+  const row = await db
+    .prepare("SELECT * FROM order_map WHERE client_id = ?1 AND mintsoft_order_id = ?2")
+    .bind(clientId, mintsoftOrderId)
+    .first<Row>();
+  return row ? toRecord(row) : null;
+}
+
 export async function getOrderMapByWixNumber(db: D1Database, clientId: number, wixOrderNumber: string): Promise<OrderMapRecord | null> {
   const row = await db
     .prepare("SELECT * FROM order_map WHERE client_id = ?1 AND wix_order_number = ?2")
