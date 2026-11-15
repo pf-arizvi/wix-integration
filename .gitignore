@@ -1,0 +1,18 @@
+# Secrets — never commit
+.dev.vars
+.dev.vars.*
+!.dev.vars.example
+.env
+.env.*
+
+# Dependencies / build output
+node_modules/
+dist/
+coverage/
+
+# Wrangler local state (local D1, caches)
+.wrangler/
+
+# OS / editor
+.DS_Store
+*.log

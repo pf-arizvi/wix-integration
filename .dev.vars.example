@@ -1,0 +1,16 @@
+# Copy to .dev.vars for local development (.dev.vars is git-ignored).
+# Placeholders only — never put real values in this file.
+
+# Mintsoft warehouse-level API key (sent as the ms-apikey header)
+MINTSOFT_API_KEY=replace-me
+
+# Bearer token for /admin/* endpoints. Generate: openssl rand -base64 48
+ADMIN_TOKEN=replace-me
+
+# 32-byte base64 AES-GCM key used to encrypt client Wix API keys in D1.
+# Generate: openssl rand -base64 32
+ENCRYPTION_KEY=replace-me
+
+# Local overrides of wrangler.jsonc vars
+WORKER_BASE_URL=http://localhost:8787
+DEBUG_PAYLOADS=false

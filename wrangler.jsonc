@@ -1,0 +1,39 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "wix-integration",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-10-01",
+
+  // Workers Logs (free plan includes it). Lets us check CPU time per invocation.
+  "observability": { "enabled": true },
+
+  // Free plan: max 5 cron triggers per account. We use 2.
+  // Must match CRON in src/config.ts.
+  "triggers": {
+    "crons": [
+      "*/5 * * * *", // F1 importOrders
+      "0 * * * *"    // F3 reconcile
+    ]
+  },
+
+  // Non-secret config. Strings on purpose: parsed in src/config.ts.
+  // Secrets (MINTSOFT_API_KEY, ADMIN_TOKEN, ENCRYPTION_KEY) are set with
+  // `wrangler secret put` and, locally, in .dev.vars. See .dev.vars.example.
+  "vars": {
+    "MAX_ORDERS_PER_RUN": "15",
+    "DEBUG_PAYLOADS": "false",
+    // Public base URL of the deployed Worker, used to build Mintsoft webhook URLs.
+    // Set after first deploy, e.g. https://wix-integration.<account>.workers.dev
+    "WORKER_BASE_URL": ""
+  },
+
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "wix-integration",
+      // Placeholder until `wrangler d1 create` is run. Local dev/tests work without it.
+      "database_id": "00000000-0000-0000-0000-000000000000",
+      "migrations_dir": "migrations"
+    }
+  ]
+}
