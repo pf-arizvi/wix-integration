@@ -111,9 +111,9 @@ Each client creates the API key in **their own** Wix account (keys only work on 
 | Search orders | `POST /ecom/v1/orders/search` | Body below. Cursor paging. |
 | Create fulfilment | `POST /ecom/v1/fulfillments/orders/{wixOrderId}/create-fulfillment` | Uses Wix order **id** (UUID), not `number`. 409 `TRACKING_NUMBER_ALREADY_EXISTS` = already done → treat as success. |
 | List fulfilments for order | `List Fulfillments for Single Order` | VERIFY exact path in docs. Used for idempotency in F3. |
-| Catalog version | Catalog Versioning API | VERIFY path. Returns V1 or V3. Site uses one or the other — wrong version = calls fail. |
-| Variants (Catalog V3) | Read-Only Variants V3 query | Variant-centric, up to 1,000 per request. Products V3 query does NOT include variants. |
-| Products (Catalog V1) | `POST /stores/v1/products/query` | Variants nested in product. VERIFY. |
+| Catalog version | `GET /stores/v3/provision/version` | Returns `catalogVersion`: `V1_CATALOG` / `V3_CATALOG` / `STORES_NOT_INSTALLED`. Site uses one or the other — wrong version = calls fail. |
+| Variants (Catalog V3) | `POST /stores/v3/products/query-variants` | Variant-centric, up to 1,000 per request. Weight only returned when `fields` includes `WEIGHT_MEASUREMENT_UNIT_INFO`. Follow-up pages send cursor only. |
+| Products (Catalog V1) | `POST /stores/v1/products/query` | Variants nested in product. VERIFY. Not built yet (no V1 test site); V1 sites are refused with a clear error. |
 
 Order search body (F1):
 ```json
@@ -159,7 +159,7 @@ Auth: `ms-apikey: <MINTSOFT_API_KEY>` (one warehouse-level key, Worker secret).
 | SKU exists? | `GET /api/Product/LookupProductId?SKU=&ClientId=` | Returns product ID. VERIFY what an unknown SKU returns (handled: 0 / empty / 404). |
 | Get order | `GET /api/Order/{id}` | Despatch webhook POSTs the same JSON as this call. Includes tracking number + URL. |
 | Despatched since | Order list with `SinceDespatchDate` | 100/page cap. ClientId filter ignored on warehouse keys → filter client-side. |
-| Products | `PUT /api/Product`, lookup by SKU | VERIFY endpoints/fields. |
+| Products | `PUT /api/Product` (create; `POST` = update, never used), `GET /api/Product/{id}` | Body `Product`, required `SKU` + `Weight`; returns `NewProductResult` (`ProductId`, `Success`, `Message`). Existing check via LookupProductId (row above). |
 | Clients | `GET /api/Client` | |
 
 ---
@@ -210,12 +210,12 @@ If no tracking number: still create the fulfilment without tracking? → **No.**
 | Mintsoft | Wix (V3 variant) | Rule |
 |---|---|---|
 | SKU | variant `sku` | Required; missing → report, skip |
-| Name | product name + option choices | "Black Bag - Medium" |
-| Barcode/EAN | variant `barcode` | if present |
-| Weight | variant `physicalProperties.weight` | site unit (KG expected) |
-| Price | variant `actualPrice` | VERIFY field |
+| Name | `productData.name` + option choice names | "Black Bag - Medium" (multiple options joined with " / ") |
+| EAN | variant `barcode` | if present |
+| Weight | variant `physicalProperties.weight` | kg (LB converted). VERIFY Mintsoft unit is kg. **No weight → create with 0 and flag `zero_weight`** (agreed). |
+| Price | variant `price.actualPrice.amount` | Swagger field `Price`. |
 | ClientId | client config | |
-Never send stock quantities.
+Never send stock quantities. Digital products skipped. **Hidden products/variants are imported** (agreed).
 
 ---
 
@@ -335,17 +335,19 @@ Mintsoft `ExtraCode2` cancel webhook → log to `error_log` with code `mintsoft_
 4. Respect batch caps; advance `reconcile_since`.
 
 ### 6.6 F4 — importProducts (admin, manual)
-`POST /admin/clients/:slug/import-products?dryRun=true|false`
-1. Detect catalog version (cache on client row).
-2. Page through variants (V3 Read-Only Variants, or V1 products+variants).
-3. For each variant: skip non-physical; missing SKU → report; SKU exists in Mintsoft → skip (never overwrite); else create.
-4. Must handle large catalogues within free-plan limits: process one page per request and return a `nextCursor`; caller (me, via curl/script) calls again until done. Provide `scripts/import-products.sh` that loops.
-5. Return a report: created / skipped_existing / missing_sku / errors.
+`POST /admin/clients/:slug/import-products?dryRun=true|false&cursor=…&maxCreates=N` (dry run by default)
+1. Detect catalog version (cached on the client row after a real run). V1 → refused for now.
+2. Page through variants (V3 Read-Only Variants), 12 per request (worst case 3 Mintsoft calls each).
+3. For each variant: skip digital; missing SKU → report; duplicate SKU within Wix → report; SKU exists in Mintsoft for the client → skip (never overwrite); else create, then read back and confirm ClientId.
+4. The first create in each request is looked up again by SKU. If the lookup doesn't return it, halt (an untrusted existing-SKU check would create duplicates on re-runs).
+5. Must handle large catalogues within free-plan limits: one page per request, return `nextCursor`. If stopped part-way (maxCreates, budget, API error), `nextCursor` is the same page; re-running it is safe. `scripts/import-products.sh` loops.
+6. Return a report: created / wouldCreate / skippedExisting / missingSku / duplicateSkuInWix / skippedNonPhysical / errors, with `zero_weight` flags.
 
 ### 6.7 Admin endpoints (Bearer `ADMIN_TOKEN`)
 - `POST /admin/clients` — create client (body: name, slug, mintsoft_client_id, mintsoft_client_name, wix_site_id, wix_api_key, defaults, optional import_orders_since). Encrypts key, generates webhook token, detects catalog version (Phase 4), test-calls Wix + Mintsoft, returns webhook URL.
 - `GET /admin/clients` — list (never return keys).
 - `PUT /admin/clients/:slug/courier-map` — upsert mappings.
+- `POST /admin/clients/:slug/import-products` — run F4, one page (§6.6).
 - `POST /admin/clients/:slug/run-import` — run F1 for one client now.
 - `POST /admin/clients/:slug/orders/:wixOrderNumber/retry` — retry a held/failed order.
 - `GET /admin/errors?unresolved=1` and `POST /admin/errors/:id/resolve`.
@@ -359,10 +361,11 @@ Mintsoft `ExtraCode2` cancel webhook → log to `error_log` with code `mintsoft_
 
 ### 7.1 Mintsoft write guardrails
 Enforced in `src/adapters/mintsoft/client.ts` (every write goes through one guarded function):
-1. **Kill switch** `MINTSOFT_WRITES_ENABLED`: only the exact string `true` enables writes. Otherwise the cron import is skipped and `run-import` is a dry run that writes nothing anywhere (Mintsoft, order_map, error_log, cursor) and returns would-be payloads.
+1. **Kill switch** `MINTSOFT_WRITES_ENABLED`: only the exact string `true` enables writes (orders and products alike). Otherwise the cron import is skipped and `run-import` / `import-products` are dry runs that write nothing anywhere (Mintsoft, order_map, error_log, cursor, catalog_version) and return would-be payloads. While it is on, the 5-minute cron also imports orders.
 2. **ClientId allowlist** `MINTSOFT_ALLOWED_CLIENT_IDS`: any write whose body ClientId is not listed is refused before the request is sent.
 3. **Onboarding check**: `POST /admin/clients` requires `mintsoft_client_name`, and it must exactly equal the Name Mintsoft has for that ID.
-4. **Read-back**: after create, `GET /api/Order/{id}` must report the expected ClientId, otherwise the client is deactivated and the run halts.
+4. **Read-back**: after create, `GET /api/Order/{id}` / `GET /api/Product/{id}` must report the expected ClientId, otherwise the client is deactivated and the run halts.
+5. **Lookup proof** (products): the first product created per request must be found again by LookupProductId, otherwise the import halts.
 
 Secrets (`wrangler secret put`, and `.dev.vars` locally):
 - `MINTSOFT_API_KEY`
@@ -409,6 +412,8 @@ Standard error codes: `missing_sku`, `unknown_sku`, `unmapped_courier`, `no_phys
 
 ## 10. Build phases (stop after each for review)
 
+> **Reordered (2026-11-15):** product import was moved ahead of order import going live. Products must exist in Mintsoft before orders can import (otherwise every order is held `unknown_sku`), so onboarding order is: create client → import products → courier map → orders. Phase 4 below was built straight after Phase 1; Phases 2, 3 and 5 follow.
+
 **Phase 0 — Scaffold**
 Wrangler TS project in this repo, D1 binding + migration 0001, router, env types, `lib/http.ts`, `lib/crypto.ts`, `lib/auth.ts`, vitest set up, npm scripts, `.gitignore`, `.dev.vars.example`, README with setup steps.
 
@@ -422,7 +427,8 @@ Webhook route, trackingMapper (defensive), Wix fulfilments adapter, pushTracking
 
 **Phase 3 — Reconcile (F3) + health/errors endpoints**
 
-**Phase 4 — Product import (F4)** incl. V1/V3 detection and `scripts/import-products.sh`.
+**Phase 4 — Product import (F4)** incl. V1/V3 detection and `scripts/import-products.sh`. *(Built after Phase 1; V1 catalogue support deferred until a V1 site is available.)*
+*Acceptance:* dev-site variants `BLKBAGSMALL` / `BLKBAGMEDIUM` created in Mintsoft client 38; re-run creates nothing; order 10002 dry run then shows `would_import`.
 
 **Phase 5 — Hardening**
 Alert digest, payload purge job, client rotation fairness, README runbook (onboarding a new client step-by-step, rotating keys, common errors).
