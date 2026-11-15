@@ -4,6 +4,12 @@
   "main": "src/index.ts",
   "compatibility_date": "2026-10-01",
 
+  // Public URL: https://wix-integration.pf-integrations.workers.dev
+  // Mintsoft webhook URLs are built from it — don't change the subdomain.
+  "workers_dev": true,
+  // Per-version preview URLs would run with production D1 + secrets. Keep off.
+  "preview_urls": false,
+
   // Workers Logs (free plan includes it). Lets us check CPU time per invocation.
   "observability": { "enabled": true },
 
@@ -23,8 +29,7 @@
     "MAX_ORDERS_PER_RUN": "15",
     "DEBUG_PAYLOADS": "false",
     // Public base URL of the deployed Worker, used to build Mintsoft webhook URLs.
-    // Set after first deploy, e.g. https://wix-integration.<account>.workers.dev
-    "WORKER_BASE_URL": ""
+    "WORKER_BASE_URL": "https://wix-integration.pf-integrations.workers.dev"
   },
 
   "d1_databases": [
