@@ -14,3 +14,7 @@ ENCRYPTION_KEY=replace-me
 # Local overrides of wrangler.jsonc vars
 WORKER_BASE_URL=http://localhost:8787
 DEBUG_PAYLOADS=false
+
+# Mintsoft write guardrails. Keep writes off locally unless deliberately testing.
+MINTSOFT_WRITES_ENABLED=false
+MINTSOFT_ALLOWED_CLIENT_IDS=38

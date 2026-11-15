@@ -54,3 +54,26 @@ export function maxOrdersPerRun(env: Pick<Env, "MAX_ORDERS_PER_RUN">): number {
 export function debugPayloads(env: Pick<Env, "DEBUG_PAYLOADS">): boolean {
   return env.DEBUG_PAYLOADS === "true";
 }
+
+/** Only the exact string "true" enables Mintsoft writes. Missing/typo = disabled. */
+export function mintsoftWritesEnabled(env: Pick<Env, "MINTSOFT_WRITES_ENABLED">): boolean {
+  return env.MINTSOFT_WRITES_ENABLED === "true";
+}
+
+/** Parses MINTSOFT_ALLOWED_CLIENT_IDS. Invalid entries are dropped (never widen access). */
+export function allowedMintsoftClientIds(env: Pick<Env, "MINTSOFT_ALLOWED_CLIENT_IDS">): ReadonlySet<number> {
+  const ids = new Set<number>();
+  for (const part of (env.MINTSOFT_ALLOWED_CLIENT_IDS ?? "").split(",")) {
+    const s = part.trim();
+    if (/^[1-9]\d*$/.test(s)) ids.add(Number(s));
+  }
+  return ids;
+}
+
+/** Estimated Mintsoft + Wix calls to import one order (pre-check, SKU lookups, create, read-back). */
+export function callsToImportOrder(distinctSkus: number): number {
+  return 3 + distinctSkus;
+}
+
+/** Max pages of GET /api/Client scanned when verifying a client at onboarding (100 per page). */
+export const MINTSOFT_CLIENT_SCAN_MAX_PAGES = 10;

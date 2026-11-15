@@ -19,6 +19,8 @@ export default defineConfig(async () => {
             ENCRYPTION_KEY: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
             WORKER_BASE_URL: "https://worker.test",
             DEBUG_PAYLOADS: "false",
+            MINTSOFT_WRITES_ENABLED: "false",
+            MINTSOFT_ALLOWED_CLIENT_IDS: "38",
           },
         },
       }),

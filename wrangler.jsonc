@@ -29,7 +29,15 @@
     "MAX_ORDERS_PER_RUN": "15",
     "DEBUG_PAYLOADS": "false",
     // Public base URL of the deployed Worker, used to build Mintsoft webhook URLs.
-    "WORKER_BASE_URL": "https://wix-integration.pf-integrations.workers.dev"
+    "WORKER_BASE_URL": "https://wix-integration.pf-integrations.workers.dev",
+
+    // ── Mintsoft write guardrails (enforced in src/adapters/mintsoft/client.ts) ──
+    // Master switch. "false" = nothing is ever written to Mintsoft; the cron import
+    // is skipped and admin run-import is a dry run that returns would-be payloads.
+    "MINTSOFT_WRITES_ENABLED": "false",
+    // Comma-separated Mintsoft ClientIds that may be written to. Any write for
+    // another ClientId is refused before it leaves the Worker. 38 = Wix Test Client.
+    "MINTSOFT_ALLOWED_CLIENT_IDS": "38"
   },
 
   "d1_databases": [

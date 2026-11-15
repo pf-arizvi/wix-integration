@@ -13,6 +13,10 @@ export interface Env {
   MAX_ORDERS_PER_RUN: string;
   DEBUG_PAYLOADS: string;
   WORKER_BASE_URL: string;
+  /** "true" to allow Mintsoft writes. Anything else = dry run only. */
+  MINTSOFT_WRITES_ENABLED: string;
+  /** Comma-separated Mintsoft ClientIds that writes may target. */
+  MINTSOFT_ALLOWED_CLIENT_IDS: string;
 
   // Secrets (`wrangler secret put` / .dev.vars)
   MINTSOFT_API_KEY: string;
