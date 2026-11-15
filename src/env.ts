@@ -17,6 +17,8 @@ export interface Env {
   MINTSOFT_WRITES_ENABLED: string;
   /** Comma-separated Mintsoft ClientIds that writes may target. */
   MINTSOFT_ALLOWED_CLIENT_IDS: string;
+  /** Mintsoft WarehouseId sent on every order. Same for all clients. */
+  MINTSOFT_WAREHOUSE_ID: string;
 
   // Secrets (`wrangler secret put` / .dev.vars)
   MINTSOFT_API_KEY: string;

@@ -6,6 +6,7 @@ import { wixOrder } from "../helpers";
 
 const ctx = {
   mintsoftClientId: 38,
+  mintsoftWarehouseId: 3,
   orderNumberPrefix: "",
   courierServiceId: 7,
   despatchWebhookUrl: "https://worker.test/webhooks/mintsoft/despatch/wix-test?token=t",
@@ -33,6 +34,7 @@ describe("mapWixOrderToMintsoft — fixture order 10002", () => {
       Email: "test.buyer@example.com",
       Phone: "+447700900000",
       CourierServiceId: 7,
+      WarehouseId: 3,
       Currency: "GBP",
       OrderValue: 205,
       ShippingTotalExVat: 5,

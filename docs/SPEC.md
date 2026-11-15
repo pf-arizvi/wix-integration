@@ -186,6 +186,7 @@ All Mintsoft field names: **VERIFY against Swagger** (keep in one object so they
 | Phone | `recipientInfo.contactDetails.phone` | |
 | CourierServiceId | `shippingInfo.title` / `shippingInfo.code` | Via `courier_map` table (§5). No match → client default; no default → hold order. |
 | OrderValue | `priceSummary.total.amount` | number |
+| WarehouseId | config `MINTSOFT_WAREHOUSE_ID` (3) | Required by Mintsoft ("You must specify a WarehouseId"); one warehouse for all clients (agreed). |
 | ShippingTotalExVat | `priceSummary.shipping.amount` | Swagger has no `ShippingTotal`. "Values only": no line-level VAT split. |
 | TotalVat | `priceSummary.tax.amount` | |
 | Currency | `currency` | |
@@ -357,7 +358,7 @@ Mintsoft `ExtraCode2` cancel webhook → log to `error_log` with code `mintsoft_
 
 ## 7. Configuration & secrets
 
-`wrangler.jsonc` (or `.toml`): D1 binding `DB`, crons `["*/5 * * * *", "0 * * * *"]`, vars `MAX_ORDERS_PER_RUN=15`, `DEBUG_PAYLOADS=false`, `WORKER_BASE_URL`, `MINTSOFT_WRITES_ENABLED=false`, `MINTSOFT_ALLOWED_CLIENT_IDS=38`.
+`wrangler.jsonc` (or `.toml`): D1 binding `DB`, crons `["*/5 * * * *", "0 * * * *"]`, vars `MAX_ORDERS_PER_RUN=15`, `DEBUG_PAYLOADS=false`, `WORKER_BASE_URL`, `MINTSOFT_WRITES_ENABLED=false`, `MINTSOFT_ALLOWED_CLIENT_IDS=38`, `MINTSOFT_WAREHOUSE_ID=3`.
 
 ### 7.1 Mintsoft write guardrails
 Enforced in `src/adapters/mintsoft/client.ts` (every write goes through one guarded function):

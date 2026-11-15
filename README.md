@@ -80,6 +80,7 @@ Nothing is written to Mintsoft unless **both** are true. Both are checked in `sr
 |---|---|---|
 | `MINTSOFT_WRITES_ENABLED` | `"false"` | Only the exact string `"true"` allows any write (orders or products). Otherwise the cron import is skipped, and `run-import` and `import-products` are dry runs. |
 | `MINTSOFT_ALLOWED_CLIENT_IDS` | `"38"` | Comma-separated. A write for any other ClientId is refused. |
+| `MINTSOFT_WAREHOUSE_ID` | `"3"` | WarehouseId sent on every order (Mintsoft requires one). The same for all clients. If it's missing or invalid, order import refuses to run. |
 
 On top of that:
 - **Onboarding** checks the client's ID and exact name against Mintsoft before anything is saved.

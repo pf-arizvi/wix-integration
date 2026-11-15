@@ -219,6 +219,22 @@ describe("importOrders — guardrails", () => {
     expect((await rows("SELECT status, mintsoft_order_id FROM order_map"))[0]).toEqual({ status: "held", mintsoft_order_id: 5000 });
   });
 
+  it("sends MINTSOFT_WAREHOUSE_ID on every order", async () => {
+    const client = await insertClient();
+    const wms = fakeWms();
+    await run(fakeDeps(fakeOrderSource([wixOrder()]), wms), client);
+    expect(wms.created[0]!.WarehouseId).toBe(3);
+  });
+
+  it("refuses to run, before any Mintsoft call, when MINTSOFT_WAREHOUSE_ID is not configured", async () => {
+    const client = await insertClient();
+    const wms = fakeWms();
+    const source = fakeOrderSource([wixOrder()]);
+    await expect(run({ ...fakeDeps(source, wms), mintsoftWarehouseId: null }, client)).rejects.toThrow(/MINTSOFT_WAREHOUSE_ID/);
+    expect(source.calls).toBe(0);
+    expect(wms.created).toHaveLength(0);
+  });
+
   it("refuses to run for a client whose Mintsoft ID is not allowlisted", async () => {
     const client = await insertClient({ mintsoftClientId: 39 });
     const wms = fakeWms();

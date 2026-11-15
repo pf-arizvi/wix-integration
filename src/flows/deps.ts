@@ -10,7 +10,7 @@ import { createProduct, getProduct, lookupProductId } from "../adapters/mintsoft
 import { getCatalogVersion, queryVariantsV3 } from "../adapters/wix/catalog";
 import { createWixApi, type WixApi } from "../adapters/wix/client";
 import { searchPaidUnfulfilledOrders } from "../adapters/wix/orders";
-import { allowedMintsoftClientIds, mintsoftWritesEnabled } from "../config";
+import { allowedMintsoftClientIds, mintsoftWarehouseId, mintsoftWritesEnabled } from "../config";
 import type { ClientRecord } from "../db/clients";
 import type { Env } from "../env";
 import { decryptSecret } from "../lib/crypto";
@@ -56,5 +56,6 @@ export function createFlowDeps(env: Env, opts: { http?: HttpClient } = {}): Flow
     orderSourceFromCredentials: (apiKey, siteId) => orderSource(createWixApi(http, { apiKey, siteId })),
     workerBaseUrl: env.WORKER_BASE_URL,
     encryptionKey: env.ENCRYPTION_KEY,
+    mintsoftWarehouseId: mintsoftWarehouseId(env),
   };
 }

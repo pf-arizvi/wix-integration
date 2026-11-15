@@ -8,6 +8,7 @@ import type { WixAddress, WixContactDetails, WixLineItem, WixMoney, WixOrder } f
 
 export interface OrderMappingContext {
   mintsoftClientId: number;
+  mintsoftWarehouseId: number;
   orderNumberPrefix: string;
   courierServiceId: number;
   despatchWebhookUrl: string;
@@ -74,6 +75,7 @@ export function mapWixOrderToMintsoft(order: WixOrder, lines: readonly WixLineIt
     Email: clean(order.buyerInfo?.email),
     Phone: clean(contact?.phone),
     CourierServiceId: ctx.courierServiceId,
+    WarehouseId: ctx.mintsoftWarehouseId,
     Currency: clean(order.currency),
     // "Values only" (agreed): no per-line VAT split.
     OrderValue: money(order.priceSummary?.total),

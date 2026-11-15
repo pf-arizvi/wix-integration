@@ -18,3 +18,4 @@ DEBUG_PAYLOADS=false
 # Mintsoft write guardrails. Keep writes off locally unless deliberately testing.
 MINTSOFT_WRITES_ENABLED=false
 MINTSOFT_ALLOWED_CLIENT_IDS=38
+MINTSOFT_WAREHOUSE_ID=3

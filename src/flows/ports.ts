@@ -57,4 +57,6 @@ export interface FlowDeps {
   orderSourceFromCredentials(apiKey: string, siteId: string): OrderSourcePort;
   workerBaseUrl: string;
   encryptionKey: string;
+  /** MINTSOFT_WAREHOUSE_ID; null = not configured (order import refuses to run). */
+  mintsoftWarehouseId: number | null;
 }

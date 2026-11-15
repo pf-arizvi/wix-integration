@@ -205,6 +205,7 @@ export function fakeDeps(
     orderSourceFromCredentials: () => source,
     workerBaseUrl: "https://worker.test",
     encryptionKey: env.ENCRYPTION_KEY,
+    mintsoftWarehouseId: 3,
   };
 }
 

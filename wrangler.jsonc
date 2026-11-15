@@ -37,7 +37,9 @@
     "MINTSOFT_WRITES_ENABLED": "false",
     // Comma-separated Mintsoft ClientIds that may be written to. Any write for
     // another ClientId is refused before it leaves the Worker. 38 = Wix Test Client.
-    "MINTSOFT_ALLOWED_CLIENT_IDS": "38"
+    "MINTSOFT_ALLOWED_CLIENT_IDS": "38",
+    // Mintsoft WarehouseId sent on every order (required by PUT /api/Order). Same for all clients.
+    "MINTSOFT_WAREHOUSE_ID": "3"
   },
 
   "d1_databases": [

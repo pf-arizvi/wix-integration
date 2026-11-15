@@ -21,6 +21,7 @@ export default defineConfig(async () => {
             DEBUG_PAYLOADS: "false",
             MINTSOFT_WRITES_ENABLED: "false",
             MINTSOFT_ALLOWED_CLIENT_IDS: "38",
+            MINTSOFT_WAREHOUSE_ID: "3",
           },
         },
       }),

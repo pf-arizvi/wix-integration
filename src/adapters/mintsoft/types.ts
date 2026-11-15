@@ -43,6 +43,8 @@ export interface MintsoftNewOrder {
   Email?: string;
   Phone?: string;
   CourierServiceId?: number;
+  /** Required by Mintsoft ("You must specify a WarehouseId"). */
+  WarehouseId: number;
   Currency?: string;
   OrderValue?: number;
   ShippingTotalExVat?: number;

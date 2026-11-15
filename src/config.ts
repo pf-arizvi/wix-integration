@@ -60,6 +60,12 @@ export function mintsoftWritesEnabled(env: Pick<Env, "MINTSOFT_WRITES_ENABLED">)
   return env.MINTSOFT_WRITES_ENABLED === "true";
 }
 
+/** MINTSOFT_WAREHOUSE_ID as a positive integer, or null if missing/invalid (imports then refuse to run). */
+export function mintsoftWarehouseId(env: Pick<Env, "MINTSOFT_WAREHOUSE_ID">): number | null {
+  const s = (env.MINTSOFT_WAREHOUSE_ID ?? "").trim();
+  return /^[1-9]\d*$/.test(s) ? Number(s) : null;
+}
+
 /** F4: Wix variants per import-products request. Worst case per variant: lookup + create + read-back = 3 calls. */
 export const PRODUCT_IMPORT_PAGE_SIZE = 12;
 

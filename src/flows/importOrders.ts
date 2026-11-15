@@ -81,6 +81,10 @@ export async function importOrdersForClient(deps: FlowDeps, client: ClientRecord
   if (!deps.workerBaseUrl) {
     throw new ImportConfigError("config_error", "WORKER_BASE_URL is not set; cannot register despatch webhooks");
   }
+  const warehouseId = deps.mintsoftWarehouseId;
+  if (warehouseId == null) {
+    throw new ImportConfigError("config_error", "MINTSOFT_WAREHOUSE_ID is not set to a valid number; Mintsoft requires a WarehouseId on every order");
+  }
 
   const cursorFrom = (await getSyncState(deps.db, client.id, "orders_cursor")) ?? client.createdAt;
   const since = new Date(Date.parse(cursorFrom) - ORDERS_CURSOR_OVERLAP_MS).toISOString();
@@ -136,7 +140,7 @@ export async function importOrdersForClient(deps: FlowDeps, client: ClientRecord
           report.stoppedBy = "subrequest_budget";
           break outer;
         }
-        report.outcomes.push(await processOrder(deps, client, order, rules, urls, dryRun));
+        report.outcomes.push(await processOrder(deps, client, order, rules, urls, warehouseId, dryRun));
         report.processed++;
         markHandled(order);
       }
@@ -163,6 +167,7 @@ async function processOrder(
   order: WixOrder,
   rules: readonly CourierRule[],
   urls: WebhookUrls,
+  warehouseId: number,
   dryRun: boolean,
 ): Promise<OrderOutcome> {
   const num = order.number;
@@ -205,6 +210,7 @@ async function processOrder(
 
   const payload = mapWixOrderToMintsoft(order, v.lines, {
     mintsoftClientId: msClientId,
+    mintsoftWarehouseId: warehouseId,
     orderNumberPrefix: client.orderNumberPrefix,
     courierServiceId: courier.courierServiceId,
     despatchWebhookUrl: urls.despatch,

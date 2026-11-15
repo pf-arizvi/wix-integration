@@ -4,7 +4,7 @@ import { findClientById } from "../../src/adapters/mintsoft/clients";
 import { createOrder, findOrdersByNumber } from "../../src/adapters/mintsoft/orders";
 import { createProduct, lookupProductId } from "../../src/adapters/mintsoft/products";
 import type { MintsoftNewOrder, MintsoftNewProduct } from "../../src/adapters/mintsoft/types";
-import { allowedMintsoftClientIds, mintsoftWritesEnabled } from "../../src/config";
+import { allowedMintsoftClientIds, mintsoftWarehouseId, mintsoftWritesEnabled } from "../../src/config";
 import { createHttpClient } from "../../src/lib/http";
 
 function setup(
@@ -30,7 +30,7 @@ function setup(
 }
 
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
-const order = (clientId: unknown): MintsoftNewOrder => ({ ClientId: clientId as number, OrderNumber: "10002", OrderItems: [{ SKU: "A", Quantity: 1 }] });
+const order = (clientId: unknown): MintsoftNewOrder => ({ ClientId: clientId as number, OrderNumber: "10002", WarehouseId: 3, OrderItems: [{ SKU: "A", Quantity: 1 }] });
 const product = (clientId: unknown): MintsoftNewProduct => ({ ClientId: clientId as number, SKU: "A", Name: "Thing", Weight: 0.5 });
 
 describe("Mintsoft write guardrails", () => {
@@ -92,6 +92,11 @@ describe("guardrail config parsing", () => {
       expect(mintsoftWritesEnabled({ MINTSOFT_WRITES_ENABLED: v as string })).toBe(false);
     }
   });
+  it("parses MINTSOFT_WAREHOUSE_ID strictly", () => {
+    expect(mintsoftWarehouseId({ MINTSOFT_WAREHOUSE_ID: "3" })).toBe(3);
+    for (const v of ["", "0", "-3", "3.5", "abc", undefined]) expect(mintsoftWarehouseId({ MINTSOFT_WAREHOUSE_ID: v as string })).toBeNull();
+  });
+
   it("drops invalid allowlist entries rather than widening access", () => {
     expect([...allowedMintsoftClientIds({ MINTSOFT_ALLOWED_CLIENT_IDS: " 38, 40 ,abc,-1,0,4.5,*" })]).toEqual([38, 40]);
     expect(allowedMintsoftClientIds({ MINTSOFT_ALLOWED_CLIENT_IDS: "" }).size).toBe(0);
