@@ -2,12 +2,15 @@ import { describe, expect, it } from "vitest";
 import { createMintsoftApi, MintsoftWriteBlockedError } from "../../src/adapters/mintsoft/client";
 import { findClientById } from "../../src/adapters/mintsoft/clients";
 import { createOrder, findOrdersByNumber } from "../../src/adapters/mintsoft/orders";
-import { lookupProductId } from "../../src/adapters/mintsoft/products";
-import type { MintsoftNewOrder } from "../../src/adapters/mintsoft/types";
+import { createProduct, lookupProductId } from "../../src/adapters/mintsoft/products";
+import type { MintsoftNewOrder, MintsoftNewProduct } from "../../src/adapters/mintsoft/types";
 import { allowedMintsoftClientIds, mintsoftWritesEnabled } from "../../src/config";
 import { createHttpClient } from "../../src/lib/http";
 
-function setup(responses: (Response | ((url: string) => Response))[], cfg: { writesEnabled?: boolean; allowed?: number[] } = {}) {
+function setup(
+  responses: (Response | ((url: string) => Response))[],
+  cfg: { writesEnabled?: boolean; allowed?: number[] } = {},
+) {
   const calls: { url: string; init: RequestInit }[] = [];
   const http = createHttpClient({
     sleep: async () => {},
@@ -28,12 +31,29 @@ function setup(responses: (Response | ((url: string) => Response))[], cfg: { wri
 
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
 const order = (clientId: unknown): MintsoftNewOrder => ({ ClientId: clientId as number, OrderNumber: "10002", OrderItems: [{ SKU: "A", Quantity: 1 }] });
+const product = (clientId: unknown): MintsoftNewProduct => ({ ClientId: clientId as number, SKU: "A", Name: "Thing", Weight: 0.5 });
 
 describe("Mintsoft write guardrails", () => {
-  it("refuses every write when MINTSOFT_WRITES_ENABLED is off — no request is sent", async () => {
-    const { api, calls } = setup([json([{ Success: true, OrderId: 1 }])], { writesEnabled: false });
+  it("refuses every write when MINTSOFT_WRITES_ENABLED is off — orders and products — no request is sent", async () => {
+    const { api, calls } = setup([json([{ Success: true, OrderId: 1 }]), json({ Success: true, ProductId: 1 })], { writesEnabled: false });
     await expect(createOrder(api, order(38))).rejects.toMatchObject({ name: "MintsoftWriteBlockedError", code: "mintsoft_writes_disabled" });
+    await expect(createProduct(api, product(38))).rejects.toMatchObject({ name: "MintsoftWriteBlockedError", code: "mintsoft_writes_disabled" });
     expect(calls).toHaveLength(0);
+  });
+
+  it.each([39, 0, "38", undefined])("refuses product writes for ClientId %j — no request is sent", async (clientId) => {
+    const { api, calls } = setup([json({ Success: true, ProductId: 1 })]);
+    await expect(createProduct(api, product(clientId))).rejects.toMatchObject({ code: "mintsoft_client_not_allowed" });
+    expect(calls).toHaveLength(0);
+  });
+
+  it("sends an allowed product create as PUT /api/Product, with no stock fields", async () => {
+    const { api, calls } = setup([json({ Success: true, ProductId: 77, SKU: "A" })]);
+    expect(await createProduct(api, product(38))).toMatchObject({ Success: true, ProductId: 77 });
+    expect(calls[0]!.url).toBe("https://api.mintsoft.co.uk/api/Product");
+    expect(calls[0]!.init.method).toBe("PUT");
+    const sent = JSON.parse(calls[0]!.init.body as string);
+    expect(Object.keys(sent).filter((k) => /stock|onhand|quantity|level/i.test(k))).toEqual([]);
   });
 
   it.each([39, 0, -38, 38.5, "38", null, undefined])("refuses ClientId %j when only 38 is allowed — no request is sent", async (clientId) => {
@@ -59,14 +79,18 @@ describe("Mintsoft write guardrails", () => {
   });
 
   it("refuses to construct without an API key", () => {
-    expect(() => createMintsoftApi(createHttpClient(), { apiKey: "", writesEnabled: true, allowedClientIds: new Set([38]) })).toThrow(/MINTSOFT_API_KEY/);
+    expect(() =>
+      createMintsoftApi(createHttpClient(), { apiKey: "", writesEnabled: true, allowedClientIds: new Set([38]) }),
+    ).toThrow(/MINTSOFT_API_KEY/);
   });
 });
 
 describe("guardrail config parsing", () => {
   it("only the exact string 'true' enables writes", () => {
     expect(mintsoftWritesEnabled({ MINTSOFT_WRITES_ENABLED: "true" })).toBe(true);
-    for (const v of ["TRUE", "1", "yes", "", " true", "false"]) expect(mintsoftWritesEnabled({ MINTSOFT_WRITES_ENABLED: v })).toBe(false);
+    for (const v of ["TRUE", "1", "yes", "", " true", "false", undefined]) {
+      expect(mintsoftWritesEnabled({ MINTSOFT_WRITES_ENABLED: v as string })).toBe(false);
+    }
   });
   it("drops invalid allowlist entries rather than widening access", () => {
     expect([...allowedMintsoftClientIds({ MINTSOFT_ALLOWED_CLIENT_IDS: " 38, 40 ,abc,-1,0,4.5,*" })]).toEqual([38, 40]);

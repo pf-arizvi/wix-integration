@@ -73,6 +73,38 @@ export interface WixOrder {
   };
 }
 
+/**
+ * Catalog V3 Read-Only Variant (subset).
+ * https://dev.wix.com/docs/api-reference/business-solutions/stores/catalog-v3/read-only-variants-v3/query-variants
+ */
+export interface WixReadOnlyVariant {
+  variantId?: string;
+  sku?: string;
+  barcode?: string;
+  visible?: boolean;
+  /** weight is only returned when fields includes WEIGHT_MEASUREMENT_UNIT_INFO. */
+  physicalProperties?: { weight?: number };
+  digitalProperties?: unknown;
+  optionChoices?: { optionChoiceNames?: { optionName?: string; choiceName?: string } }[];
+  price?: { actualPrice?: WixMoney };
+  productData?: {
+    productId?: string;
+    name?: string;
+    productType?: string; // PHYSICAL | DIGITAL
+    visible?: boolean;
+    physicalProperties?: { weightMeasurementUnitInfo?: { weightMeasurementUnit?: string } }; // KG | LB
+  };
+}
+
+export interface WixQueryVariantsResponse {
+  variants?: WixReadOnlyVariant[];
+  pagingMetadata?: WixCursorPagingMetadata;
+}
+
+export interface WixCatalogVersionResponse {
+  catalogVersion?: string; // V1_CATALOG | V3_CATALOG | STORES_NOT_INSTALLED
+}
+
 export interface WixCursorPagingMetadata {
   count?: number;
   hasNext?: boolean;

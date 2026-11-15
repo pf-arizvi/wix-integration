@@ -37,7 +37,10 @@ import { type CourierRule, resolveCourier } from "../mapping/courierMap";
 import { mapWixOrderToMintsoft } from "../mapping/orderMapper";
 import { validateWixOrder } from "../mapping/validation";
 import { createFlowDeps } from "./deps";
+import { ImportConfigError, ImportHaltedError } from "./errors";
 import type { FlowDeps } from "./ports";
+
+export { ImportConfigError, ImportHaltedError };
 
 export type OrderOutcome =
   | { wixOrderNumber: string; outcome: "imported"; mintsoftOrderId: number; warehouseId?: number; channelId?: number }
@@ -58,21 +61,6 @@ export interface ClientImportReport {
   /** New orders_cursor (null = unchanged; always null in dry run). */
   cursorTo: string | null;
   stoppedBy: "order_cap" | "subrequest_budget" | null;
-}
-
-/** Thrown when a guardrail detects real damage. Stops the whole run. */
-export class ImportHaltedError extends Error {
-  override readonly name = "ImportHaltedError";
-}
-
-export class ImportConfigError extends Error {
-  override readonly name = "ImportConfigError";
-  constructor(
-    readonly code: ErrorCode,
-    message: string,
-  ) {
-    super(message);
-  }
 }
 
 export interface ImportOptions {

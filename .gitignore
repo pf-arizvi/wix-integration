@@ -16,3 +16,6 @@ coverage/
 # OS / editor
 .DS_Store
 *.log
+
+# Product import reports (contain client catalogue data)
+import-reports/

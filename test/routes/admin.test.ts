@@ -1,6 +1,6 @@
 import { env, exports } from "cloudflare:workers";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { resetDb, rows, wixOrder } from "../helpers";
+import { resetDb, rows, variant, wixOrder } from "../helpers";
 
 const call = (path: string, init: RequestInit & { auth?: boolean } = {}) => {
   const { auth = true, ...rest } = init;
@@ -29,6 +29,10 @@ function stubUpstreams() {
     const url = new URL(String(input));
     const method = init?.method ?? "GET";
     calls.push({ method, url, body: init?.body ? JSON.parse(String(init.body)) : undefined });
+    if (url.pathname === "/stores/v3/provision/version") return res({ catalogVersion: "V3_CATALOG" });
+    if (url.pathname === "/stores/v3/products/query-variants") {
+      return res({ variants: [variant("BLKBAGSMALL"), variant("BLKBAGMEDIUM")], pagingMetadata: { hasNext: false } });
+    }
     if (url.host === "www.wixapis.com") return res({ orders: [wixOrder()], metadata: { hasNext: false } });
     if (url.pathname === "/api/Client") return res([{ ID: 38, Name: "Wix Test Client" }]);
     if (url.pathname === "/api/Order/Search") return res([]);
@@ -47,6 +51,7 @@ describe("admin auth", () => {
     ["GET", "/admin/clients"],
     ["PUT", "/admin/clients/x/courier-map"],
     ["POST", "/admin/clients/x/run-import"],
+    ["POST", "/admin/clients/x/import-products"],
   ])("%s %s requires the admin token", async (method, path) => {
     expect((await call(path, { method, auth: false })).status).toBe(401);
   });
@@ -84,6 +89,28 @@ describe("POST /admin/clients", () => {
     expect(calls.some((c) => c.url.host === "www.wixapis.com")).toBe(true);
     expect(calls.filter((c) => c.url.host === "api.mintsoft.co.uk" && c.method !== "GET")).toEqual([]);
     expect(await rows("SELECT * FROM order_map")).toHaveLength(0);
+  });
+});
+
+describe("POST /admin/clients/:slug/import-products", () => {
+  it("dry-runs end-to-end through the real adapters and writes nothing to Mintsoft", async () => {
+    const calls = stubUpstreams();
+    await post("/admin/clients", createBody);
+    const r = await post("/admin/clients/wix-test/import-products?dryRun=false", {});
+    expect(r.status).toBe(200);
+    const report = (await r.json()) as { dryRun: boolean; note: string; catalogVersion: string; skippedExisting: unknown[]; done: boolean };
+    expect(report).toMatchObject({ dryRun: true, catalogVersion: "V3", done: true });
+    expect(report.note).toMatch(/MINTSOFT_WRITES_ENABLED/);
+    expect(report.skippedExisting).toHaveLength(2); // stub lookup returns an ID for every SKU
+    const variantQuery = calls.find((c) => c.url.pathname === "/stores/v3/products/query-variants")!;
+    expect(variantQuery.body).toMatchObject({ fields: ["WEIGHT_MEASUREMENT_UNIT_INFO"] });
+    expect(calls.filter((c) => c.url.host === "api.mintsoft.co.uk" && c.method !== "GET")).toEqual([]);
+  });
+
+  it("validates maxCreates", async () => {
+    stubUpstreams();
+    await post("/admin/clients", createBody);
+    expect((await post("/admin/clients/wix-test/import-products?maxCreates=0", {})).status).toBe(400);
   });
 });
 

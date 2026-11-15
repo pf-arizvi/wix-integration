@@ -9,7 +9,7 @@ import { runReconcile } from "./flows/reconcile";
 import { log } from "./lib/log";
 import { errorJson, json } from "./lib/response";
 import { adminOnly, Router } from "./router";
-import { createClientHandler, listClientsHandler, putCourierMapHandler, runImportHandler } from "./routes/admin";
+import { createClientHandler, importProductsHandler, listClientsHandler, putCourierMapHandler, runImportHandler } from "./routes/admin";
 
 const router = new Router()
   // Unauthenticated liveness probe. Touches nothing, returns no data.
@@ -22,11 +22,10 @@ const router = new Router()
   .post("/admin/clients", adminOnly(createClientHandler))
   .get("/admin/clients", adminOnly(listClientsHandler))
   .put("/admin/clients/:slug/courier-map", adminOnly(putCourierMapHandler))
+  .post("/admin/clients/:slug/import-products", adminOnly(importProductsHandler))
   .post("/admin/clients/:slug/run-import", adminOnly(runImportHandler));
 // TODO(Phase 2): POST /webhooks/mintsoft/despatch/:slug
 // TODO(Phase 3): /admin/clients/:slug/orders/:wixOrderNumber/retry, /admin/errors*, full /admin/health
-// TODO(Phase 4): POST /admin/clients/:slug/import-products
-
 export default {
   async fetch(request, env, ctx): Promise<Response> {
     try {

@@ -60,6 +60,9 @@ export function mintsoftWritesEnabled(env: Pick<Env, "MINTSOFT_WRITES_ENABLED">)
   return env.MINTSOFT_WRITES_ENABLED === "true";
 }
 
+/** F4: Wix variants per import-products request. Worst case per variant: lookup + create + read-back = 3 calls. */
+export const PRODUCT_IMPORT_PAGE_SIZE = 12;
+
 /** Parses MINTSOFT_ALLOWED_CLIENT_IDS. Invalid entries are dropped (never widen access). */
 export function allowedMintsoftClientIds(env: Pick<Env, "MINTSOFT_ALLOWED_CLIENT_IDS">): ReadonlySet<number> {
   const ids = new Set<number>();

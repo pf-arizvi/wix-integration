@@ -5,14 +5,16 @@
 import { createMintsoftApi } from "../adapters/mintsoft/client";
 import { findClientById } from "../adapters/mintsoft/clients";
 import { createOrder, findOrdersByNumber, getOrder } from "../adapters/mintsoft/orders";
-import { lookupProductId } from "../adapters/mintsoft/products";
-import { createWixApi } from "../adapters/wix/client";
+import { createProduct, getProduct, lookupProductId } from "../adapters/mintsoft/products";
+import { getCatalogVersion, queryVariantsV3 } from "../adapters/wix/catalog";
+import { createWixApi, type WixApi } from "../adapters/wix/client";
 import { searchPaidUnfulfilledOrders } from "../adapters/wix/orders";
 import { allowedMintsoftClientIds, mintsoftWritesEnabled } from "../config";
+import type { ClientRecord } from "../db/clients";
 import type { Env } from "../env";
 import { decryptSecret } from "../lib/crypto";
 import { createHttpClient, type HttpClient, SubrequestBudget } from "../lib/http";
-import type { FlowDeps, OrderSourcePort, WmsPort } from "./ports";
+import type { CatalogSourcePort, FlowDeps, OrderSourcePort, WmsPort } from "./ports";
 
 export function createFlowDeps(env: Env, opts: { http?: HttpClient } = {}): FlowDeps {
   const budget = opts.http?.budget ?? new SubrequestBudget();
@@ -29,19 +31,26 @@ export function createFlowDeps(env: Env, opts: { http?: HttpClient } = {}): Flow
     lookupProductId: (sku, c) => lookupProductId(api, sku, c),
     createOrder: (o) => createOrder(api, o),
     getOrder: (id) => getOrder(api, id),
+    createProduct: (p) => createProduct(api, p),
+    getProduct: (id) => getProduct(api, id),
   };
 
-  const fromCredentials = (apiKey: string, siteId: string): OrderSourcePort => {
-    const wix = createWixApi(http, { apiKey, siteId });
-    return { searchPaidUnfulfilled: (o) => searchPaidUnfulfilledOrders(wix, o) };
-  };
+  const wixFor = async (client: ClientRecord): Promise<WixApi> =>
+    createWixApi(http, { apiKey: await decryptSecret(client.wixApiKeyEnc, env.ENCRYPTION_KEY), siteId: client.wixSiteId });
+
+  const orderSource = (wix: WixApi): OrderSourcePort => ({ searchPaidUnfulfilled: (o) => searchPaidUnfulfilledOrders(wix, o) });
+  const catalogSource = (wix: WixApi): CatalogSourcePort => ({
+    getCatalogVersion: () => getCatalogVersion(wix),
+    queryVariants: (o) => queryVariantsV3(wix, o),
+  });
 
   return {
     db: env.DB,
     budget,
     wms,
-    orderSourceFor: async (client) => fromCredentials(await decryptSecret(client.wixApiKeyEnc, env.ENCRYPTION_KEY), client.wixSiteId),
-    orderSourceFromCredentials: fromCredentials,
+    orderSourceFor: async (client) => orderSource(await wixFor(client)),
+    catalogSourceFor: async (client) => catalogSource(await wixFor(client)),
+    orderSourceFromCredentials: (apiKey, siteId) => orderSource(createWixApi(http, { apiKey, siteId })),
     workerBaseUrl: env.WORKER_BASE_URL,
     encryptionKey: env.ENCRYPTION_KEY,
   };

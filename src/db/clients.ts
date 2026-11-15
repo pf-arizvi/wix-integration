@@ -132,6 +132,10 @@ export async function listActiveClients(db: D1Database): Promise<ClientRecord[]>
   return results.map(toRecord);
 }
 
+export async function setCatalogVersion(db: D1Database, id: number, version: string): Promise<void> {
+  await db.prepare("UPDATE clients SET catalog_version = ?2 WHERE id = ?1").bind(id, version).run();
+}
+
 /** Guardrail circuit-breaker: stop all automated work for a client. Re-enable manually. */
 export async function deactivateClient(db: D1Database, id: number): Promise<void> {
   await db.prepare("UPDATE clients SET active = 0 WHERE id = ?1").bind(id).run();

@@ -77,6 +77,35 @@ export interface MintsoftOrder {
   TrackingURL?: string;
 }
 
+/** Swagger: Product (subset) — body of PUT /api/Product. SKU + Weight are required. Never stock. */
+export interface MintsoftNewProduct {
+  ClientId: number;
+  SKU: string;
+  Name: string;
+  /** VERIFY: Mintsoft Weight unit is kg. */
+  Weight: number;
+  EAN?: string;
+  Price?: number;
+}
+
+/** Swagger: NewProductResult. */
+export interface MintsoftNewProductResult {
+  ProductId?: number;
+  SKU?: string;
+  Name?: string;
+  Success?: boolean;
+  Message?: string;
+}
+
+/** Swagger: Product (subset). GET /api/Product/{id}. */
+export interface MintsoftProduct {
+  ID: number;
+  SKU?: string;
+  Name?: string;
+  ClientId?: number;
+  Weight?: number;
+}
+
 /** Swagger: Client (subset). GET /api/Client. */
 export interface MintsoftClient {
   ID: number;

@@ -7,6 +7,7 @@ import { getClientBySlug, listClients, toPublicClient } from "../db/clients";
 import { listCourierRules, upsertCourierRules } from "../db/courierMap";
 import { createFlowDeps } from "../flows/deps";
 import { ImportConfigError, ImportHaltedError, importOrdersForClient } from "../flows/importOrders";
+import { importProductsPage } from "../flows/importProducts";
 import { onboardClient, type OnboardInput } from "../flows/onboardClient";
 import type { FlowDeps } from "../flows/ports";
 import type { Env } from "../env";
@@ -124,6 +125,44 @@ export const putCourierMapHandler: Handler = async ({ request, env, params }) =>
   }
   await upsertCourierRules(env.DB, client.id, rules);
   return json({ client: client.slug, mappings: await listCourierRules(env.DB, client.id) });
+};
+
+/**
+ * POST /admin/clients/:slug/import-products?dryRun=true|false&cursor=…&maxCreates=N
+ * One page of Wix variants per call; loop with `nextCursor` until `done` (scripts/import-products.sh).
+ * Defaults to a DRY RUN. dryRun=false only takes effect when MINTSOFT_WRITES_ENABLED=true.
+ */
+export const importProductsHandler: Handler = async ({ env, params, url }) => {
+  const client = await getClientBySlug(env.DB, params.slug!);
+  if (!client) return errorJson(404, "client_not_found");
+  if (!client.active) return errorJson(409, "client_inactive", `Client ${client.slug} is inactive`);
+
+  const maxCreatesRaw = url.searchParams.get("maxCreates");
+  const maxCreates = maxCreatesRaw == null ? undefined : Number(maxCreatesRaw);
+  if (maxCreates !== undefined && (!Number.isInteger(maxCreates) || maxCreates < 1)) {
+    return errorJson(400, "invalid_input", "maxCreates must be a positive integer");
+  }
+  const deps = withDeps(env);
+  if (deps instanceof Response) return deps;
+
+  const requestedDryRun = url.searchParams.get("dryRun") !== "false";
+  try {
+    const report = await importProductsPage(deps, client, {
+      cursor: url.searchParams.get("cursor") || null,
+      dryRun: requestedDryRun,
+      ...(maxCreates !== undefined ? { maxCreates } : {}),
+    });
+    return json({
+      ...report,
+      ...(report.dryRun && !requestedDryRun ? { note: "Forced dry run: MINTSOFT_WRITES_ENABLED is not true" } : {}),
+      subrequestsLeft: deps.budget.remaining,
+    });
+  } catch (err) {
+    if (err instanceof ImportConfigError) return errorJson(400, err.code, err.message);
+    if (err instanceof ImportHaltedError) return errorJson(500, "import_halted", err.message);
+    if (err instanceof HttpError) return errorJson(502, err.service === "wix" ? "wix_api_error" : "mintsoft_api_error", err.message);
+    throw err;
+  }
 };
 
 /**

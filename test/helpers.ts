@@ -1,10 +1,19 @@
 import { env } from "cloudflare:workers";
-import type { MintsoftClient, MintsoftNewOrder, MintsoftNewOrderResult, MintsoftOrder } from "../src/adapters/mintsoft/types";
+import type {
+  MintsoftClient,
+  MintsoftNewOrder,
+  MintsoftNewOrderResult,
+  MintsoftNewProduct,
+  MintsoftNewProductResult,
+  MintsoftOrder,
+  MintsoftProduct,
+} from "../src/adapters/mintsoft/types";
 import { checkWriteAllowed } from "../src/adapters/mintsoft/client";
-import type { WixOrder } from "../src/adapters/wix/types";
+import type { CatalogVersion } from "../src/adapters/wix/catalog";
+import type { WixOrder, WixReadOnlyVariant } from "../src/adapters/wix/types";
 import { createClient, type ClientRecord } from "../src/db/clients";
 import { setSyncState } from "../src/db/syncState";
-import type { FlowDeps, OrderSourcePort, WmsPort } from "../src/flows/ports";
+import type { CatalogSourcePort, FlowDeps, OrderSourcePort, WmsPort } from "../src/flows/ports";
 import { SubrequestBudget } from "../src/lib/http";
 import fixture from "./fixtures/wix-order-paid.json";
 
@@ -57,21 +66,33 @@ export function fakeOrderSource(orders: WixOrder[]): OrderSourcePort & { calls: 
 export interface FakeWms extends WmsPort {
   store: MintsoftOrder[];
   created: MintsoftNewOrder[];
+  /** SKUs that "exist" in Mintsoft (lookup returns 1 for these). */
   skus: Set<string>;
+  /** Products created through createProduct. */
+  products: MintsoftProduct[];
+  createdProducts: MintsoftNewProduct[];
   /** Override what GET /api/Order/{id} reports as ClientId. */
   reportedClientId?: number;
+  /** Override what GET /api/Product/{id} reports as ClientId. */
+  reportedProductClientId?: number;
   createImpl?: (o: MintsoftNewOrder) => Promise<MintsoftNewOrderResult>;
+  createProductImpl?: (p: MintsoftNewProduct) => Promise<MintsoftNewProductResult>;
+  /** Simulate a lookup that never "sees" created products. */
+  lookupIgnoresCreated?: boolean;
   clients: MintsoftClient[];
 }
 
 export function fakeWms(opts: { writesEnabled?: boolean; skus?: string[] } = {}): FakeWms {
   let nextId = 5000;
+  let nextProductId = 9000;
   const wms: FakeWms = {
     writesEnabled: opts.writesEnabled ?? true,
     allowedClientIds: new Set([38]),
     store: [],
     created: [],
     skus: new Set(opts.skus ?? ["BLKBAGMEDIUM", "BLKBAGSMALL"]),
+    products: [],
+    createdProducts: [],
     clients: [{ ID: 38, Name: "Wix Test Client" }, { ID: 39, Name: "Someone Else" }],
     async findClientById(id) {
       return wms.clients.find((c) => c.ID === id) ?? null;
@@ -79,8 +100,23 @@ export function fakeWms(opts: { writesEnabled?: boolean; skus?: string[] } = {})
     async findOrdersByNumber(n, clientId) {
       return wms.store.filter((o) => o.OrderNumber === n && o.ClientId === clientId);
     },
-    async lookupProductId(sku) {
+    async lookupProductId(sku, clientId) {
+      const p = wms.lookupIgnoresCreated ? undefined : wms.products.find((x) => x.SKU === sku && x.ClientId === clientId);
+      if (p) return p.ID;
       return wms.skus.has(sku) ? 1 : null;
+    },
+    async createProduct(p) {
+      checkWriteAllowed(wms, p.ClientId); // same guard as the real adapter
+      if (wms.createProductImpl) return wms.createProductImpl(p);
+      wms.createdProducts.push(p);
+      const id = nextProductId++;
+      wms.products.push({ ID: id, SKU: p.SKU, ClientId: p.ClientId, Name: p.Name });
+      return { Success: true, ProductId: id, SKU: p.SKU };
+    },
+    async getProduct(id) {
+      const p = wms.products.find((x) => x.ID === id);
+      if (!p) throw new Error(`product ${id} not found`);
+      return { ...p, ClientId: wms.reportedProductClientId ?? p.ClientId };
     },
     async createOrder(o) {
       checkWriteAllowed(wms, o.ClientId); // same guard as the real adapter
@@ -99,11 +135,55 @@ export function fakeWms(opts: { writesEnabled?: boolean; skus?: string[] } = {})
   return wms;
 }
 
-export function fakeDeps(source: OrderSourcePort, wms: WmsPort, budget = new SubrequestBudget()): FlowDeps {
+/** In-memory Wix catalog V3: pages of `limit` with numeric cursors. */
+export function fakeCatalog(variants: WixReadOnlyVariant[], version: CatalogVersion = "V3"): CatalogSourcePort & { versionCalls: number; pages: number } {
+  const cat = {
+    versionCalls: 0,
+    pages: 0,
+    async getCatalogVersion() {
+      cat.versionCalls++;
+      return version;
+    },
+    async queryVariants(opts: { limit: number; cursor?: string | null }) {
+      cat.pages++;
+      const start = opts.cursor ? Number(opts.cursor) : 0;
+      const end = start + opts.limit;
+      return { variants: variants.slice(start, end), nextCursor: end < variants.length ? String(end) : null };
+    },
+  };
+  return cat;
+}
+
+/** A V3 variant like the dev site's "Black Bag". */
+export function variant(sku: string | undefined, overrides: Partial<WixReadOnlyVariant> = {}): WixReadOnlyVariant {
+  return {
+    variantId: `v-${sku ?? "nosku"}`,
+    sku,
+    visible: true,
+    physicalProperties: { weight: 0.5 },
+    optionChoices: [{ optionChoiceNames: { optionName: "Size", choiceName: sku?.replace("BLKBAG", "").toLowerCase() ?? "?" } }],
+    price: { actualPrice: { amount: "100.00" } },
+    productData: {
+      productId: "p-blackbag",
+      name: "Black Bag",
+      productType: "PHYSICAL",
+      physicalProperties: { weightMeasurementUnitInfo: { weightMeasurementUnit: "KG" } },
+    },
+    ...overrides,
+  };
+}
+
+export function fakeDeps(
+  source: OrderSourcePort,
+  wms: WmsPort,
+  budget = new SubrequestBudget(),
+  catalog: CatalogSourcePort = fakeCatalog([]),
+): FlowDeps {
   return {
     db: env.DB,
     budget,
     wms,
+    catalogSourceFor: async () => catalog,
     orderSourceFor: async () => source,
     orderSourceFromCredentials: () => source,
     workerBaseUrl: "https://worker.test",
