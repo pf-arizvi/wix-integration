@@ -50,7 +50,13 @@ export const RECONCILE_MAX_RETRIES = 5;
 /** Worst-case calls to push one despatch: items + Wix order + Wix fulfilments + create. */
 export const CALLS_PER_DESPATCH = 4;
 
-/** Held / fulfil_failed orders are retried automatically up to this many attempts. */
+/** Held orders: retried at most this often, for this many days after first being held. */
+export const HELD_RETRY_INTERVAL_MINUTES = 60;
+export const HELD_RETRY_MAX_DAYS = 7;
+/** Held orders retried per import run (each costs a Wix read + an import attempt). */
+export const HELD_RETRIES_PER_RUN = 3;
+
+/** fulfil_failed fulfilments are retried automatically up to this many attempts. */
 export const MAX_AUTO_ATTEMPTS = 5;
 
 /** webhook_log rows older than this are purged. */
@@ -89,9 +95,9 @@ export function allowedMintsoftClientIds(env: Pick<Env, "MINTSOFT_ALLOWED_CLIENT
   return ids;
 }
 
-/** Estimated Mintsoft + Wix calls to import one order (pre-check, SKU lookups, create, read-back). */
+/** Estimated Mintsoft + Wix calls to import one order (pre-check, SKU lookups, create, read-back, items check). */
 export function callsToImportOrder(distinctSkus: number): number {
-  return 3 + distinctSkus;
+  return 4 + distinctSkus;
 }
 
 /** Max pages of GET /api/Client scanned when verifying a client at onboarding (100 per page). */

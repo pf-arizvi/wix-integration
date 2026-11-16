@@ -15,6 +15,9 @@ export interface OrderMapRecord {
   trackingNumber: string | null;
   lastError: string | null;
   attempts: number;
+  /** Set when the order was sent to Mintsoft despite an unknown SKU, so Mintsoft raises a connect error. */
+  mintsoftNotifiedAt: string | null;
+  updatedAt: string;
 }
 
 interface Row {
@@ -27,6 +30,8 @@ interface Row {
   tracking_number: string | null;
   last_error: string | null;
   attempts: number;
+  mintsoft_notified_at: string | null;
+  updated_at: string;
 }
 
 const toRecord = (r: Row): OrderMapRecord => ({
@@ -39,6 +44,8 @@ const toRecord = (r: Row): OrderMapRecord => ({
   trackingNumber: r.tracking_number,
   lastError: r.last_error,
   attempts: r.attempts,
+  mintsoftNotifiedAt: r.mintsoft_notified_at,
+  updatedAt: r.updated_at,
 });
 
 /** D1 allows 100 bound parameters per statement. */
@@ -89,6 +96,8 @@ export interface OrderOutcomeWrite {
   lastError?: string | null;
   /** Count this as an import attempt (attempts += 1). */
   countAttempt: boolean;
+  /** Record that Mintsoft was sent the order to raise its own connect error. */
+  markNotified?: boolean;
   /** Optional error_log row written in the same batch. */
   error?: NewError;
 }
@@ -97,15 +106,16 @@ export interface OrderOutcomeWrite {
 export async function saveOrderOutcome(db: D1Database, o: OrderOutcomeWrite): Promise<void> {
   const upsert = db
     .prepare(
-      `INSERT INTO order_map (client_id, wix_order_id, wix_order_number, mintsoft_order_id, status, last_error, attempts)
-       VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+      `INSERT INTO order_map (client_id, wix_order_id, wix_order_number, mintsoft_order_id, status, last_error, attempts, mintsoft_notified_at)
+       VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, CASE WHEN ?8 = 1 THEN datetime('now') END)
        ON CONFLICT (client_id, wix_order_id) DO UPDATE SET
-         wix_order_number  = excluded.wix_order_number,
-         mintsoft_order_id = COALESCE(excluded.mintsoft_order_id, order_map.mintsoft_order_id),
-         status            = excluded.status,
-         last_error        = excluded.last_error,
-         attempts          = order_map.attempts + excluded.attempts,
-         updated_at        = datetime('now')`,
+         wix_order_number     = excluded.wix_order_number,
+         mintsoft_order_id    = COALESCE(excluded.mintsoft_order_id, order_map.mintsoft_order_id),
+         status               = excluded.status,
+         last_error           = excluded.last_error,
+         attempts             = order_map.attempts + excluded.attempts,
+         mintsoft_notified_at = COALESCE(excluded.mintsoft_notified_at, order_map.mintsoft_notified_at),
+         updated_at           = datetime('now')`,
     )
     .bind(
       o.clientId,
@@ -115,6 +125,30 @@ export async function saveOrderOutcome(db: D1Database, o: OrderOutcomeWrite): Pr
       o.status,
       o.lastError ?? null,
       o.countAttempt ? 1 : 0,
+      o.markNotified ? 1 : 0,
     );
   await db.batch(o.error ? [upsert, recordErrorStatement(db, o.error)] : [upsert]);
+}
+
+/** Held orders due an automatic retry: last touched over `minAgeMinutes` ago, first seen within `maxAgeDays`. */
+export async function listHeldForRetry(
+  db: D1Database,
+  opts: { minAgeMinutes: number; maxAgeDays: number; limit: number },
+): Promise<OrderMapRecord[]> {
+  const { results } = await db
+    .prepare(
+      `SELECT * FROM order_map
+       WHERE status = 'held'
+         AND updated_at < datetime('now', ?1)
+         AND created_at > datetime('now', ?2)
+       ORDER BY updated_at LIMIT ?3`,
+    )
+    .bind(`-${opts.minAgeMinutes} minutes`, `-${opts.maxAgeDays} days`, opts.limit)
+    .all<Row>();
+  return results.map(toRecord);
+}
+
+/** Bumps updated_at so the held-order retry backs off (used when a retry didn't write an outcome). */
+export async function touchOrderMap(db: D1Database, clientId: number, wixOrderId: string): Promise<void> {
+  await db.prepare("UPDATE order_map SET updated_at = datetime('now') WHERE client_id = ?1 AND wix_order_id = ?2").bind(clientId, wixOrderId).run();
 }

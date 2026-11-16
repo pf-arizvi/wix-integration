@@ -40,7 +40,7 @@ describe("scheduled", () => {
 });
 
 describe("migrations", () => {
-  it("creates all tables and indexes (SPEC §5 + 0002 fulfilments + 0003 carrier_names)", async () => {
+  it("creates all tables and indexes (SPEC §5 + migrations 0002–0004)", async () => {
     const { results } = await env.DB.prepare(
       "SELECT type, name FROM sqlite_master WHERE type IN ('table','index') AND name NOT LIKE 'sqlite_%' AND name NOT LIKE 'd1_%' AND name NOT LIKE '_cf_%' ORDER BY name",
     ).all<{ type: string; name: string }>();
@@ -52,6 +52,7 @@ describe("migrations", () => {
       "fulfilments",
       "idx_fulfilments_status",
       "idx_fulfilments_wix_order",
+      "idx_order_map_held",
       "idx_order_map_mintsoft",
       "idx_order_map_status",
       "order_map",

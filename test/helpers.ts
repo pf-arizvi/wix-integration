@@ -52,6 +52,11 @@ export async function insertClient(overrides: Partial<Parameters<typeof createCl
 export function fakeOrderSource(orders: WixOrder[]): OrderSourcePort & { calls: number } {
   const src = {
     calls: 0,
+    async getOrder(id: string) {
+      const o = orders.find((x) => x.id === id);
+      if (!o) throw new Error(`wix order ${id} not found`);
+      return structuredClone(o);
+    },
     async searchPaidUnfulfilled(opts: { updatedSince: string; limit: number; cursor?: string | null }) {
       src.calls++;
       const matching = orders
@@ -69,6 +74,8 @@ export function fakeOrderSource(orders: WixOrder[]): OrderSourcePort & { calls: 
 export interface FakeWms extends WmsPort {
   store: MintsoftOrder[];
   created: MintsoftNewOrder[];
+  /** Create attempts Mintsoft rejected (e.g. unknown SKU sent to raise a connect error). */
+  rejected: MintsoftNewOrder[];
   /** SKUs that "exist" in Mintsoft (lookup returns 1 for these). */
   skus: Set<string>;
   /** Products created through createProduct. */
@@ -82,6 +89,8 @@ export interface FakeWms extends WmsPort {
   createProductImpl?: (p: MintsoftNewProduct) => Promise<MintsoftNewProductResult>;
   /** Simulate a lookup that never "sees" created products. */
   lookupIgnoresCreated?: boolean;
+  /** Simulate Mintsoft ACCEPTING orders with unknown SKUs (default: rejects, like a channel import). */
+  acceptsUnknownSkus?: boolean;
   clients: MintsoftClient[];
   courierServices: MintsoftCourierService[];
   /** Mintsoft order id → its items (GET /api/Order/{id}/Items). */
@@ -101,6 +110,7 @@ export function fakeWms(opts: { writesEnabled?: boolean; skus?: string[] } = {})
     allowedClientIds: new Set([38]),
     store: [],
     created: [],
+    rejected: [],
     skus: new Set(opts.skus ?? ["BLKBAGMEDIUM", "BLKBAGSMALL"]),
     products: [],
     createdProducts: [],
@@ -122,7 +132,10 @@ export function fakeWms(opts: { writesEnabled?: boolean; skus?: string[] } = {})
       return all.slice((page - 1) * 100, page * 100);
     },
     async getOrderItems(id) {
-      return wms.orderItems[id] ?? [];
+      if (wms.orderItems[id]) return wms.orderItems[id]!;
+      const idx = wms.store.findIndex((x) => x.ID === id);
+      const created = idx >= 0 ? wms.created.find((c) => c.OrderNumber === wms.store[idx]!.OrderNumber) : undefined;
+      return created ? created.OrderItems.map((i) => ({ SKU: i.SKU, Quantity: i.Quantity })) : [];
     },
     courierNames: { 14: [{ ID: 1, CourierServiceId: 14, Name: "Express Shipping", Source: "Wix", ClientId: 38 }] },
     async listCourierServices() {
@@ -158,6 +171,11 @@ export function fakeWms(opts: { writesEnabled?: boolean; skus?: string[] } = {})
     async createOrder(o) {
       checkWriteAllowed(wms, o.ClientId); // same guard as the real adapter
       if (wms.createImpl) return wms.createImpl(o);
+      const unknown = o.OrderItems.filter((i) => !wms.skus.has(i.SKU) && !wms.products.some((p) => p.SKU === i.SKU)).map((i) => i.SKU);
+      if (unknown.length && !wms.acceptsUnknownSkus) {
+        wms.rejected.push(o);
+        return { Success: false, Message: `Product not found: ${unknown.join(", ")}` };
+      }
       wms.created.push(o);
       const id = nextId++;
       wms.store.push({ ID: id, ClientId: o.ClientId, OrderNumber: o.OrderNumber, WarehouseId: 1, ChannelId: 2 });

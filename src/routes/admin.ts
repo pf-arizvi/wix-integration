@@ -6,8 +6,10 @@ import { maxOrdersPerRun } from "../config";
 import { getClientBySlug, listActiveClients, listClients, toPublicClient } from "../db/clients";
 import { type CarrierName, listCarrierNames, upsertCarrierNames } from "../db/carrierNames";
 import { listCourierRules, upsertCourierRules } from "../db/courierMap";
+import { listErrors, resolveError } from "../db/errors";
+import { getOrderMapByWixNumber } from "../db/orderMap";
 import { createFlowDeps } from "../flows/deps";
-import { ImportConfigError, ImportHaltedError, importOrdersForClient } from "../flows/importOrders";
+import { ImportConfigError, ImportHaltedError, importOrdersForClient, retryOrder } from "../flows/importOrders";
 import { importProductsPage } from "../flows/importProducts";
 import { inspectCourierMappings } from "../flows/inspectCouriers";
 import { reconcileOnce } from "../flows/reconcile";
@@ -144,6 +146,50 @@ export const putCarriersHandler: Handler = async ({ request, env }) => {
   }
   await upsertCarrierNames(env.DB, names);
   return json({ carriers: await listCarrierNames(env.DB) });
+};
+
+/**
+ * POST /admin/clients/:slug/orders/:wixOrderNumber/retry?dryRun=true|false&notify=true
+ * Re-runs the import for one recorded order now (e.g. after adding a missing SKU in Mintsoft).
+ * Defaults to a DRY RUN. notify=true re-sends an unknown-SKU order to Mintsoft so it raises its
+ * connect error again (a Mintsoft write attempt; it is rejected, nothing is created).
+ */
+export const retryOrderHandler: Handler = async ({ env, params, url }) => {
+  const client = await getClientBySlug(env.DB, params.slug!);
+  if (!client) return errorJson(404, "client_not_found");
+  if (!client.active) return errorJson(409, "client_inactive", `Client ${client.slug} is inactive`);
+  const row = await getOrderMapByWixNumber(env.DB, client.id, params.wixOrderNumber!);
+  if (!row) return errorJson(404, "order_not_found", `No recorded order ${params.wixOrderNumber} for ${client.slug}`);
+  if (row.status !== "held") return errorJson(409, "not_held", `Order ${row.wixOrderNumber} is '${row.status}', not held`);
+  const deps = withDeps(env);
+  if (deps instanceof Response) return deps;
+  const requestedDryRun = url.searchParams.get("dryRun") !== "false";
+  try {
+    const outcome = await retryOrder(deps, client, row, { dryRun: requestedDryRun, forceNotify: url.searchParams.get("notify") === "true" });
+    return json({
+      dryRun: requestedDryRun || !deps.wms.writesEnabled,
+      ...(!requestedDryRun && !deps.wms.writesEnabled ? { note: "Forced dry run: MINTSOFT_WRITES_ENABLED is not true" } : {}),
+      outcome,
+    });
+  } catch (err) {
+    if (err instanceof ImportConfigError) return errorJson(400, err.code, err.message);
+    if (err instanceof ImportHaltedError) return errorJson(500, "import_halted", err.message);
+    if (err instanceof HttpError) return errorJson(502, err.service === "wix" ? "wix_api_error" : "mintsoft_api_error", err.message);
+    throw err;
+  }
+};
+
+/** GET /admin/errors?unresolved=1&limit=100 */
+export const listErrorsHandler: Handler = async ({ env, url }) => {
+  const limit = Math.min(Math.max(Number(url.searchParams.get("limit") ?? "100") || 100, 1), 500);
+  return json({ errors: await listErrors(env.DB, { unresolvedOnly: url.searchParams.get("unresolved") === "1", limit }) });
+};
+
+/** POST /admin/errors/:id/resolve */
+export const resolveErrorHandler: Handler = async ({ env, params }) => {
+  const id = Number(params.id);
+  if (!Number.isInteger(id) || id < 1) return errorJson(400, "invalid_input", "id must be a positive integer");
+  return (await resolveError(env.DB, id)) ? json({ ok: true, id }) : errorJson(404, "error_not_found");
 };
 
 /** POST /admin/reconcile — run reconcile now (same as the 5-minute cron). Writes to Wix only. */

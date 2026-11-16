@@ -44,7 +44,10 @@ export function createFlowDeps(env: Env, opts: { http?: HttpClient } = {}): Flow
   const wixFor = async (client: ClientRecord): Promise<WixApi> =>
     createWixApi(http, { apiKey: await decryptSecret(client.wixApiKeyEnc, env.ENCRYPTION_KEY), siteId: client.wixSiteId });
 
-  const orderSource = (wix: WixApi): OrderSourcePort => ({ searchPaidUnfulfilled: (o) => searchPaidUnfulfilledOrders(wix, o) });
+  const orderSource = (wix: WixApi): OrderSourcePort => ({
+    searchPaidUnfulfilled: (o) => searchPaidUnfulfilledOrders(wix, o),
+    getOrder: (id) => getWixOrder(wix, id),
+  });
   const catalogSource = (wix: WixApi): CatalogSourcePort => ({
     getCatalogVersion: () => getCatalogVersion(wix),
     queryVariants: (o) => queryVariantsV3(wix, o),

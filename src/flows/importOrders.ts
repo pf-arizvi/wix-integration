@@ -5,6 +5,14 @@
  *   validate → resolve courier → map → already in Mintsoft? → all SKUs exist?
  *   → [dry run stops here] → create (guarded) → read back and confirm ClientId.
  *
+ * Unknown SKU (agreed): the order is held, AND sent to Mintsoft once anyway so Mintsoft rejects
+ * it and raises its own connect error where the warehouse team looks. Automatic retries don't
+ * re-send (mintsoft_notified_at); a manual retry can. If Mintsoft unexpectedly ACCEPTS it, that's
+ * flagged straight away (mintsoft_accepted_unknown_sku) with the lines Mintsoft created.
+ *
+ * Held orders are retried by retryHeldOrders (hourly per order, for 7 days) and on demand
+ * (POST /admin/clients/:slug/orders/:wixOrderNumber/retry). The main search skips them.
+ *
  * Idempotent: order_map skips handled orders; an exact OrderNumber search in
  * Mintsoft (filtered to the client) catches orders created by an earlier attempt
  * whose response was lost.
@@ -13,11 +21,14 @@
  * not Mintsoft, not order_map, not error_log, not the cursor.
  */
 import type { MintsoftNewOrder, MintsoftOrder } from "../adapters/mintsoft/types";
+import { alertHeldOrder, alertNeedsAttention } from "./alerts";
 import { MintsoftWriteBlockedError } from "../adapters/mintsoft/client";
 import type { WixOrder } from "../adapters/wix/types";
 import {
   callsToImportOrder,
-  MAX_AUTO_ATTEMPTS,
+  HELD_RETRIES_PER_RUN,
+  HELD_RETRY_INTERVAL_MINUTES,
+  HELD_RETRY_MAX_DAYS,
   maxOrdersPerRun,
   mintsoftWritesEnabled,
   ORDERS_CURSOR_OVERLAP_MS,
@@ -26,7 +37,7 @@ import {
 import { type ClientRecord, deactivateClient, listActiveClients } from "../db/clients";
 import { listCourierRules } from "../db/courierMap";
 import { recordError } from "../db/errors";
-import { getOrderMapsByWixIds, saveOrderOutcome } from "../db/orderMap";
+import { getOrderMapsByWixIds, listHeldForRetry, type OrderMapRecord, saveOrderOutcome, touchOrderMap } from "../db/orderMap";
 import { getSyncState, setSyncState } from "../db/syncState";
 import type { Env } from "../env";
 import type { ErrorCode } from "../errorCodes";
@@ -43,7 +54,7 @@ import type { FlowDeps } from "./ports";
 export { ImportConfigError, ImportHaltedError };
 
 export type OrderOutcome =
-  | { wixOrderNumber: string; outcome: "imported"; mintsoftOrderId: number; warehouseId?: number; channelId?: number }
+  | { wixOrderNumber: string; outcome: "imported"; mintsoftOrderId: number; warehouseId?: number; channelId?: number; warning?: string }
   | { wixOrderNumber: string; outcome: "already_in_mintsoft"; mintsoftOrderId: number }
   | { wixOrderNumber: string; outcome: "would_import"; payload: MintsoftNewOrder }
   | { wixOrderNumber: string; outcome: "held"; code: ErrorCode; message: string }
@@ -127,7 +138,8 @@ export async function importOrdersForClient(deps: FlowDeps, client: ClientRecord
 
       for (const order of page.orders) {
         const row = known.get(order.id);
-        if (row && (row.status !== "held" || row.attempts >= MAX_AUTO_ATTEMPTS)) {
+        // Already recorded (imported, held, skipped…). Held orders are retried by retryHeldOrders.
+        if (row) {
           report.alreadyHandled++;
           markHandled(order);
           continue;
@@ -140,7 +152,7 @@ export async function importOrdersForClient(deps: FlowDeps, client: ClientRecord
           report.stoppedBy = "subrequest_budget";
           break outer;
         }
-        report.outcomes.push(await processOrder(deps, client, order, rules, urls, warehouseId, dryRun));
+        report.outcomes.push(await processOrder(deps, client, order, { rules, urls, warehouseId, dryRun, previous: null, forceNotify: false }));
         report.processed++;
         markHandled(order);
       }
@@ -161,29 +173,36 @@ export async function importOrdersForClient(deps: FlowDeps, client: ClientRecord
   return report;
 }
 
-async function processOrder(
-  deps: FlowDeps,
-  client: ClientRecord,
-  order: WixOrder,
-  rules: readonly CourierRule[],
-  urls: WebhookUrls,
-  warehouseId: number,
-  dryRun: boolean,
-): Promise<OrderOutcome> {
+interface ProcessContext {
+  rules: readonly CourierRule[];
+  urls: WebhookUrls;
+  warehouseId: number;
+  dryRun: boolean;
+  /** Existing order_map row (retries), null for a first attempt. */
+  previous: OrderMapRecord | null;
+  /** Re-send an unknown-SKU order to Mintsoft even if it was already sent once (manual retry). */
+  forceNotify: boolean;
+}
+
+async function processOrder(deps: FlowDeps, client: ClientRecord, order: WixOrder, pc: ProcessContext): Promise<OrderOutcome> {
+  const { rules, urls, warehouseId, dryRun, previous } = pc;
   const num = order.number;
   const msClientId = client.mintsoftClientId;
   const base = { clientId: client.id, wixOrderId: order.id, wixOrderNumber: num };
 
-  const hold = async (code: ErrorCode, message: string, mintsoftOrderId?: number): Promise<OrderOutcome> => {
+  const hold = async (code: ErrorCode, message: string, o: { mintsoftOrderId?: number; markNotified?: boolean } = {}): Promise<OrderOutcome> => {
     if (!dryRun) {
       await saveOrderOutcome(deps.db, {
         ...base,
         status: "held",
-        mintsoftOrderId: mintsoftOrderId ?? null,
+        mintsoftOrderId: o.mintsoftOrderId ?? null,
         lastError: message,
         countAttempt: true,
+        markNotified: o.markNotified ?? false,
         error: { clientId: client.id, flow: "importOrders", ref: num, code, message },
       });
+      // Alert once, when the order first becomes held (not on every retry).
+      if (previous?.status !== "held") await alertHeldOrder({ client: client.slug, wixOrderNumber: num, code, message });
     }
     log.warn("importOrders.held", { client: client.slug, order: num, code });
     return { wixOrderNumber: num, outcome: "held", code, message };
@@ -232,16 +251,24 @@ async function processOrder(
     for (const sku of distinctSkus(order, v.lines)) {
       if ((await deps.wms.lookupProductId(sku, msClientId)) == null) missing.push(sku);
     }
-    if (missing.length) {
-      return hold("unknown_sku", `Order ${num} held: SKU ${missing.join(", ")} not found in Mintsoft client ${msClientId}`);
+    const reason = `SKU ${missing.join(", ")} not found in Mintsoft client ${msClientId}`;
+    const notifyMintsoft = missing.length > 0 && (pc.forceNotify || !previous?.mintsoftNotifiedAt);
+    if (missing.length && !notifyMintsoft) return hold("unknown_sku", `Order ${num} held: ${reason}`);
+    if (missing.length && dryRun) {
+      return hold("unknown_sku", `Order ${num} held: ${reason} (a real run sends it to Mintsoft once so Mintsoft raises a connect error)`);
     }
-
     if (dryRun) return { wixOrderNumber: num, outcome: "would_import", payload };
 
     // 3. Create. The adapter re-checks writes-enabled + ClientId allowlist before sending.
+    //    With unknown SKUs this is sent ONLY so Mintsoft rejects it and shows its connect error.
     const res = await deps.wms.createOrder(payload);
     if (!res.Success || !res.OrderId) {
       const msg = res.Message?.trim() || "no message";
+      if (missing.length) {
+        return hold("unknown_sku", `Order ${num} held: ${reason}. Sent to Mintsoft to raise its connect error; Mintsoft replied: ${msg}`, {
+          markNotified: true,
+        });
+      }
       return hold(/sku|product/i.test(msg) ? "unknown_sku" : "mintsoft_rejected", `Order ${num} held: Mintsoft rejected the order: ${msg}`);
     }
     const mintsoftOrderId = res.OrderId;
@@ -281,6 +308,29 @@ async function processOrder(
       throw new ImportHaltedError(message);
     }
 
+    if (missing.length) {
+      // Mintsoft accepted an order we know has unknown SKUs: possibly a partial import. Flag it now.
+      let lines = "unknown";
+      try {
+        lines = (await deps.wms.getOrderItems(mintsoftOrderId)).map((i) => `${i.SKU ?? "?"} × ${i.Quantity ?? "?"}`).join(", ") || "none";
+      } catch (err) {
+        if (err instanceof HttpError && err.kind === "budget_exhausted") throw err;
+      }
+      const warning =
+        `Order ${num}: Mintsoft ACCEPTED it as order ${mintsoftOrderId} although ${reason}. ` +
+        `Mintsoft order lines: ${lines}. Wix lines: ${v.lines.map((l) => `${l.physicalProperties?.sku} × ${l.quantity}`).join(", ")}. Check the order in Mintsoft.`;
+      await saveOrderOutcome(deps.db, {
+        ...base,
+        status: "imported",
+        mintsoftOrderId,
+        countAttempt: true,
+        markNotified: true,
+        error: { clientId: client.id, flow: "importOrders", ref: num, code: "mintsoft_accepted_unknown_sku", message: warning },
+      });
+      await alertNeedsAttention({ client: client.slug, wixOrderNumber: num, code: "mintsoft_accepted_unknown_sku", message: warning });
+      return { wixOrderNumber: num, outcome: "imported", mintsoftOrderId, warning };
+    }
+
     await saveOrderOutcome(deps.db, { ...base, status: "imported", mintsoftOrderId, countAttempt: true });
     log.info("importOrders.imported", {
       client: client.slug,
@@ -297,6 +347,64 @@ async function processOrder(
     if (err instanceof HttpError) return hold("mintsoft_api_error", `Order ${num} held: ${err.message}`);
     throw err;
   }
+}
+
+/** Shared setup for importing one order outside the main search (retries). */
+async function singleOrderContext(deps: FlowDeps, client: ClientRecord) {
+  if (!deps.wms.allowedClientIds.has(client.mintsoftClientId)) {
+    throw new ImportConfigError("mintsoft_client_not_allowed", `Client ${client.slug}: Mintsoft ClientId ${client.mintsoftClientId} is not allowlisted`);
+  }
+  if (!deps.workerBaseUrl) throw new ImportConfigError("config_error", "WORKER_BASE_URL is not set");
+  if (deps.mintsoftWarehouseId == null) throw new ImportConfigError("config_error", "MINTSOFT_WAREHOUSE_ID is not set to a valid number");
+  return {
+    rules: await listCourierRules(deps.db, client.id),
+    urls: webhookUrls(deps.workerBaseUrl, client.slug, client.webhookToken),
+    warehouseId: deps.mintsoftWarehouseId,
+    source: await deps.orderSourceFor(client),
+  };
+}
+
+/**
+ * Retry one recorded order now (held orders; manual admin retry). Fetches the current Wix order.
+ * `forceNotify` re-sends an unknown-SKU order to Mintsoft so it raises its connect error again.
+ */
+export async function retryOrder(
+  deps: FlowDeps,
+  client: ClientRecord,
+  row: OrderMapRecord,
+  opts: { dryRun: boolean; forceNotify: boolean },
+): Promise<OrderOutcome> {
+  const dryRun = opts.dryRun || !deps.wms.writesEnabled;
+  const ctx = await singleOrderContext(deps, client);
+  const order = await ctx.source.getOrder(row.wixOrderId);
+  const outcome = await processOrder(deps, client, order, { ...ctx, dryRun, previous: row, forceNotify: opts.forceNotify });
+  // Skipped (e.g. now cancelled or unpaid) writes nothing: bump updated_at so the hourly retry backs off.
+  if (!dryRun && outcome.outcome === "skipped") await touchOrderMap(deps.db, client.id, row.wixOrderId);
+  return outcome;
+}
+
+/** Retries held orders due a retry (hourly per order, for 7 days). Runs after the main import. */
+export async function retryHeldOrders(deps: FlowDeps, clients: readonly ClientRecord[]): Promise<OrderOutcome[]> {
+  const out: OrderOutcome[] = [];
+  const rows = await listHeldForRetry(deps.db, {
+    minAgeMinutes: HELD_RETRY_INTERVAL_MINUTES,
+    maxAgeDays: HELD_RETRY_MAX_DAYS,
+    limit: HELD_RETRIES_PER_RUN,
+  });
+  for (const row of rows) {
+    const client = clients.find((c) => c.id === row.clientId);
+    if (!client) continue;
+    if (!deps.budget.has(1 + callsToImportOrder(3))) break;
+    try {
+      out.push(await retryOrder(deps, client, row, { dryRun: false, forceNotify: false }));
+    } catch (err) {
+      if (err instanceof ImportHaltedError) throw err;
+      if (err instanceof HttpError && err.kind === "budget_exhausted") break;
+      log.warn("importOrders.held_retry_failed", { client: client.slug, order: row.wixOrderNumber, err });
+      await touchOrderMap(deps.db, client.id, row.wixOrderId);
+    }
+  }
+  return out;
 }
 
 function distinctSkus(order: WixOrder, lines = order.lineItems ?? []): string[] {
@@ -343,5 +451,11 @@ export async function runImportOrders(env: Env, _ctx: ExecutionContext): Promise
       log.error("importOrders.client_failed", { client: client.slug, code, err });
       await recordError(env.DB, { clientId: client.id, flow: "importOrders", ref: null, code, message: errMessage(err) });
     }
+  }
+
+  // Held orders (e.g. SKU since added in Mintsoft), with whatever budget is left.
+  const retried = await retryHeldOrders(deps, await listActiveClients(env.DB));
+  if (retried.length) {
+    log.info("importOrders.held_retried", { results: retried.map((r) => ({ order: r.wixOrderNumber, outcome: r.outcome })) });
   }
 }

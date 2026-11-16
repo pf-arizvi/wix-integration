@@ -180,6 +180,18 @@ npx wrangler deploy --var DEBUG_PAYLOADS:true
 npm run deploy
 ```
 
+### 6. Held orders and errors
+An order that can't be imported is **held** with a reason (unknown SKU, no SKU in Wix, unmapped courier, incomplete address…). For an **unknown SKU**, the order is also sent to Mintsoft once, so Mintsoft rejects it and shows its own connect error to the warehouse team. Held orders are retried automatically (each one at most hourly, for 7 days), so once the SKU is added in Mintsoft the order imports by itself. To act sooner:
+```sh
+# Unresolved errors, newest first
+curl -sS "$BASE/admin/errors?unresolved=1" -H "Authorization: Bearer $ADMIN_KEY" | python3 -m json.tool
+# Retry one held order now (dry run first, then for real)
+curl -sS -X POST "$BASE/admin/clients/wix-test/orders/10005/retry" -H "Authorization: Bearer $ADMIN_KEY" | python3 -m json.tool
+curl -sS -X POST "$BASE/admin/clients/wix-test/orders/10005/retry?dryRun=false" -H "Authorization: Bearer $ADMIN_KEY" | python3 -m json.tool
+# Mark an error as dealt with
+curl -sS -X POST "$BASE/admin/errors/<id>/resolve" -H "Authorization: Bearer $ADMIN_KEY"
+```
+
 List clients (never shows keys or webhook tokens):
 ```sh
 curl -sS "$BASE/admin/clients" -H "Authorization: Bearer $ADMIN_KEY"

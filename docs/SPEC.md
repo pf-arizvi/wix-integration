@@ -311,11 +311,11 @@ For each active client, until `MAX_ORDERS_PER_RUN` (15) orders processed in tota
    - If `held` → retry only if `attempts < 5` (errors may have been fixed, e.g. SKU added in Mintsoft).
    - Validate + map (§4.1). Validation failure → upsert `held` + `error_log`. Do not call Mintsoft.
    - Order Search by OrderNumber (filtered to the client). Found → store its id, mark `imported`, no create.
-   - LookupProductId for every distinct SKU. Any missing → hold `unknown_sku` (whole order).
+   - LookupProductId for every distinct SKU. Any missing → hold `unknown_sku` (whole order). **Agreed 2026-11-16:** the order is also sent to Mintsoft **once** (`order_map.mintsoft_notified_at`, migration 0004) so Mintsoft rejects it and shows its own connect error to the warehouse team. Retries don't re-send it; a manual retry with `notify=true` does. If Mintsoft ACCEPTS it anyway → `mintsoft_accepted_unknown_sku` error + alert, listing the lines Mintsoft created. VERIFY with order 10005: rejection + visible connect error.
    - `PUT /api/Order` with inline ConnectAction (despatch URL `https://<worker>/webhooks/mintsoft/despatch/<slug>?token=<webhook_token>`). `Success=false` → hold.
    - `GET /api/Order/{id}` and confirm `ClientId` matches. Mismatch → deactivate client, `mintsoft_client_mismatch`, halt the run.
    - Upsert `order_map` = `imported`.
-   - Held orders are retried when they reappear in the search window; otherwise via the admin retry endpoint (Phase 3).
+   - Held orders are skipped by the main search and retried by a sweep at the end of each import run: each held order at most hourly, for 7 days after it was first held (3 per run). Manual: `POST /admin/clients/:slug/orders/:wixOrderNumber/retry`. An alert (`alertHeldOrder`) is raised once when an order first becomes held.
 3. Advance `orders_cursor` to the max `updatedDate` fully processed (not past any order left unprocessed due to the batch cap).
 4. Rotate client order between runs so one busy client can't starve others.
 
@@ -365,7 +365,7 @@ Agreed 2026-11-15: run every 5 minutes, not hourly. The Mintsoft webhook does fi
 - `POST /admin/clients/:slug/run-import` — run F1 for one client now.
 - `POST /admin/reconcile` — run F3 now.
 - `GET` / `PUT /admin/carriers` — Mintsoft CourierServiceId → carrier name shown in Wix.
-- `POST /admin/clients/:slug/orders/:wixOrderNumber/retry` — retry a held/failed order.
+- `POST /admin/clients/:slug/orders/:wixOrderNumber/retry?dryRun=true|false&notify=true` — retry a held order now (dry run by default).
 - `GET /admin/errors?unresolved=1` and `POST /admin/errors/:id/resolve`.
 - `GET /admin/health` — last run times per flow, counts by status.
 
@@ -394,7 +394,7 @@ Provide `.dev.vars.example` with placeholder names only.
 
 ## 8. Error handling & alerting
 - Every handled failure → `error_log` row with a machine `code` + human message (e.g. "Order 10005 held: SKU BLKBAGXL not found in Mintsoft client 123").
-- v1 alerting: `GET /admin/health` + `/admin/errors`. Phase 5 adds an email/Slack/Teams notification for new unresolved errors (one digest per hour max).
+- v1 alerting: `GET /admin/errors?unresolved=1` (+ `POST /admin/errors/:id/resolve`), and an `alert.held_order` log line when an order first becomes held. Agreed recipient: arizvi@premiumfulfilment.co.uk. The sending route (Cloudflare Email Routing / Resend / Teams webhook) is still to choose; plug it into `src/flows/alerts.ts`.
 
 Standard error codes: `missing_sku`, `unknown_sku`, `unmapped_courier`, `no_physical_lines`, `invalid_address`, `wix_api_error`, `mintsoft_api_error`, `missing_tracking`, `order_not_found`, `mintsoft_cancelled`.
 

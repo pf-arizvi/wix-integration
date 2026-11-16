@@ -3,7 +3,8 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { getClientBySlug } from "../../src/db/clients";
 import { upsertCourierRules } from "../../src/db/courierMap";
 import { getSyncState } from "../../src/db/syncState";
-import { ImportConfigError, ImportHaltedError, importOrdersForClient } from "../../src/flows/importOrders";
+import { ImportConfigError, ImportHaltedError, importOrdersForClient, retryHeldOrders, retryOrder } from "../../src/flows/importOrders";
+import { getOrderMapByWixNumber } from "../../src/db/orderMap";
 import { HttpError, SubrequestBudget } from "../../src/lib/http";
 import { fakeDeps, fakeOrderSource, fakeWms, insertClient, resetDb, rows, wixOrder } from "../helpers";
 
@@ -68,8 +69,11 @@ describe("importOrders — happy path and idempotency", () => {
     wms.createImpl = async () => {
       throw new Error("must not be called again");
     };
-    const r2 = await run(fakeDeps(source, wms), client);
-    expect(r2.outcomes[0]).toMatchObject({ outcome: "already_in_mintsoft", mintsoftOrderId: 901 });
+    // The main search skips recorded orders; held ones are retried (hourly sweep / manual retry).
+    expect((await run(fakeDeps(source, wms), client)).alreadyHandled).toBe(1);
+    const row = (await getOrderMapByWixNumber(env.DB, client.id, "10002"))!;
+    const r2 = await retryOrder(fakeDeps(source, wms), client, row, { dryRun: false, forceNotify: false });
+    expect(r2).toMatchObject({ outcome: "already_in_mintsoft", mintsoftOrderId: 901 });
     expect((await rows("SELECT status, attempts FROM order_map"))[0]).toEqual({ status: "imported", attempts: 2 });
   });
 });
@@ -106,30 +110,117 @@ describe("importOrders — dry run writes nothing", () => {
 });
 
 describe("importOrders — holds", () => {
-  it("holds the whole order on an unknown SKU, then imports it once the SKU exists", async () => {
+  it("unknown SKU: holds, and sends it to Mintsoft ONCE so Mintsoft raises its connect error", async () => {
     const client = await insertClient();
     const wms = fakeWms({ skus: [] });
     const source = fakeOrderSource([wixOrder()]);
 
     const r1 = await run(fakeDeps(source, wms), client);
-    expect(r1.outcomes[0]).toMatchObject({ outcome: "held", code: "unknown_sku", message: "Order 10002 held: SKU BLKBAGMEDIUM not found in Mintsoft client 38" });
+    expect(r1.outcomes[0]).toMatchObject({
+      outcome: "held",
+      code: "unknown_sku",
+      message:
+        "Order 10002 held: SKU BLKBAGMEDIUM not found in Mintsoft client 38. Sent to Mintsoft to raise its connect error; Mintsoft replied: Product not found: BLKBAGMEDIUM",
+    });
+    expect(wms.rejected).toHaveLength(1); // the create attempt Mintsoft rejected
     expect(wms.created).toHaveLength(0);
-    expect(await rows("SELECT code, ref, flow FROM error_log")).toEqual([{ code: "unknown_sku", ref: "10002", flow: "importOrders" }]);
+    const row = (await getOrderMapByWixNumber(env.DB, client.id, "10002"))!;
+    expect(row).toMatchObject({ status: "held" });
+    expect(row.mintsoftNotifiedAt).not.toBeNull();
 
+    // Automatic retry while the SKU is still missing: held again, NOT re-sent (no connect-error spam).
+    const r2 = await retryOrder(fakeDeps(source, wms), client, row, { dryRun: false, forceNotify: false });
+    expect(r2).toMatchObject({ outcome: "held", code: "unknown_sku", message: "Order 10002 held: SKU BLKBAGMEDIUM not found in Mintsoft client 38" });
+    expect(wms.rejected).toHaveLength(1);
+
+    // SKU added in Mintsoft → the retry imports it.
     wms.skus.add("BLKBAGMEDIUM");
-    const r2 = await run(fakeDeps(source, wms), client);
-    expect(r2.outcomes[0]!.outcome).toBe("imported");
-    expect((await rows("SELECT status, attempts FROM order_map"))[0]).toEqual({ status: "imported", attempts: 2 });
+    const r3 = await retryOrder(fakeDeps(source, wms), client, (await getOrderMapByWixNumber(env.DB, client.id, "10002"))!, { dryRun: false, forceNotify: false });
+    expect(r3.outcome).toBe("imported");
+    expect(wms.created).toHaveLength(1);
+    expect((await rows("SELECT status, attempts FROM order_map"))[0]).toEqual({ status: "imported", attempts: 3 });
   });
 
-  it("stops retrying a held order after 5 attempts", async () => {
+  it("a manual retry with notify re-sends an unknown-SKU order to Mintsoft", async () => {
     const client = await insertClient();
     const wms = fakeWms({ skus: [] });
     const source = fakeOrderSource([wixOrder()]);
-    for (let i = 0; i < 5; i++) await run(fakeDeps(source, wms), client);
-    const r = await run(fakeDeps(source, wms), client);
-    expect(r).toMatchObject({ processed: 0, alreadyHandled: 1 });
-    expect((await rows("SELECT attempts FROM order_map"))[0]).toEqual({ attempts: 5 });
+    await run(fakeDeps(source, wms), client);
+    const row = (await getOrderMapByWixNumber(env.DB, client.id, "10002"))!;
+    await retryOrder(fakeDeps(source, wms), client, row, { dryRun: false, forceNotify: true });
+    expect(wms.rejected).toHaveLength(2);
+  });
+
+  it("flags it immediately if Mintsoft ACCEPTS an order with an unknown SKU (possible partial import)", async () => {
+    const client = await insertClient();
+    const wms = fakeWms({ skus: [] });
+    wms.acceptsUnknownSkus = true;
+    const r = await run(fakeDeps(fakeOrderSource([wixOrder()]), wms), client);
+    expect(r.outcomes[0]).toMatchObject({ outcome: "imported", mintsoftOrderId: 5000 });
+    const o = r.outcomes[0] as { warning?: string };
+    expect(o.warning).toContain("Mintsoft ACCEPTED it as order 5000");
+    expect(o.warning).toContain("Mintsoft order lines: BLKBAGMEDIUM × 2");
+    expect(await rows("SELECT code FROM error_log")).toEqual([{ code: "mintsoft_accepted_unknown_sku" }]);
+    expect((await rows("SELECT status, mintsoft_order_id FROM order_map"))[0]).toEqual({ status: "imported", mintsoft_order_id: 5000 });
+  });
+
+  it("dry run says an unknown-SKU order would be sent to Mintsoft once, and sends nothing", async () => {
+    const client = await insertClient();
+    const wms = fakeWms({ skus: [] });
+    const r = await run(fakeDeps(fakeOrderSource([wixOrder()]), wms), client, { dryRun: true });
+    expect((r.outcomes[0] as { message: string }).message).toMatch(/sends it to Mintsoft once/);
+    expect(wms.rejected).toHaveLength(0);
+  });
+
+  it("the main search skips held orders (they're retried by the sweep)", async () => {
+    const client = await insertClient();
+    const wms = fakeWms({ skus: [] });
+    const source = fakeOrderSource([wixOrder()]);
+    await run(fakeDeps(source, wms), client);
+    wms.skus.add("BLKBAGMEDIUM");
+    expect(await run(fakeDeps(source, wms), client)).toMatchObject({ processed: 0, alreadyHandled: 1 });
+    expect(wms.created).toHaveLength(0);
+  });
+
+  it("the sweep retries held orders hourly, for 7 days", async () => {
+    const client = await insertClient();
+    const wms = fakeWms({ skus: [] });
+    const source = fakeOrderSource([wixOrder()]);
+    await run(fakeDeps(source, wms), client);
+    wms.skus.add("BLKBAGMEDIUM");
+
+    // Held 5 minutes ago: not due yet.
+    await env.DB.prepare("UPDATE order_map SET updated_at = datetime('now', '-5 minutes')").run();
+    expect(await retryHeldOrders(fakeDeps(source, wms), [client])).toEqual([]);
+
+    // First held 8 days ago: past the 7-day window.
+    await env.DB.prepare("UPDATE order_map SET updated_at = datetime('now', '-2 hours'), created_at = datetime('now', '-8 days')").run();
+    expect(await retryHeldOrders(fakeDeps(source, wms), [client])).toEqual([]);
+
+    // Last tried 2 hours ago, first held yesterday: retried, and imports now the SKU exists.
+    await env.DB.prepare("UPDATE order_map SET updated_at = datetime('now', '-2 hours'), created_at = datetime('now', '-1 day')").run();
+    const out = await retryHeldOrders(fakeDeps(source, wms), [client]);
+    expect(out.map((o) => o.outcome)).toEqual(["imported"]);
+    expect(wms.created).toHaveLength(1);
+  });
+
+  it("alerts once when an order first becomes held, not on every retry", async () => {
+    const client = await insertClient();
+    const wms = fakeWms({ skus: [] });
+    const source = fakeOrderSource([wixOrder()]);
+    const logs: string[] = [];
+    const orig = console.warn;
+    console.warn = (line: string) => void logs.push(line);
+    try {
+      await run(fakeDeps(source, wms), client);
+      await retryOrder(fakeDeps(source, wms), client, (await getOrderMapByWixNumber(env.DB, client.id, "10002"))!, { dryRun: false, forceNotify: false });
+    } finally {
+      console.warn = orig;
+    }
+    const alerts = logs.filter((l) => l.includes('"event":"alert.held_order"'));
+    expect(alerts).toHaveLength(1);
+    expect(alerts[0]).toContain('"wixOrderNumber":"10002"');
+    expect(alerts[0]).not.toMatch(/Test Street|test\.buyer|SW1A/); // no customer details in alerts
   });
 
   it("holds when the shipping method is unmapped and the client has no default", async () => {

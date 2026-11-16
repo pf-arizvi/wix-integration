@@ -23,6 +23,7 @@ import type { SubrequestBudget } from "../lib/http";
 
 export interface OrderSourcePort {
   searchPaidUnfulfilled(opts: SearchPaidUnfulfilledOptions): Promise<OrdersPage>;
+  getOrder(wixOrderId: string): Promise<WixOrder>;
 }
 
 export interface FulfilmentTargetPort {

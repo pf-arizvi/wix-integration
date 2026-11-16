@@ -22,4 +22,5 @@ export type ErrorCode =
   | "mintsoft_client_mismatch"
   | "mintsoft_verify_failed"
   | "config_error"
-  | "internal_error";
+  | "internal_error"
+  | "mintsoft_accepted_unknown_sku";

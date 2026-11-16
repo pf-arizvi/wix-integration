@@ -46,7 +46,7 @@ describe("onboardClient guardrails", () => {
   });
 
   it("refuses when the Wix credentials fail", async () => {
-    const source = { searchPaidUnfulfilled: async () => Promise.reject(new Error("401")) };
+    const source = { searchPaidUnfulfilled: async () => Promise.reject(new Error("401")), getOrder: async () => Promise.reject(new Error("401")) };
     const r = await onboardClient(fakeDeps(source, fakeWms()), input());
     expect(r).toMatchObject({ ok: false, error: "wix_credentials_rejected" });
     expect(await rows("SELECT * FROM clients")).toHaveLength(0);

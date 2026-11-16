@@ -67,8 +67,35 @@ describe("admin auth", () => {
     ["POST", "/admin/reconcile"],
     ["GET", "/admin/carriers"],
     ["PUT", "/admin/carriers"],
+    ["POST", "/admin/clients/x/orders/1/retry"],
+    ["GET", "/admin/errors"],
+    ["POST", "/admin/errors/1/resolve"],
   ])("%s %s requires the admin token", async (method, path) => {
     expect((await call(path, { method, auth: false })).status).toBe(401);
+  });
+});
+
+describe("errors and retry endpoints", () => {
+  it("lists errors and resolves one", async () => {
+    await env.DB.batch([
+      env.DB.prepare("INSERT INTO error_log (flow, ref, code, message) VALUES ('importOrders', '10005', 'unknown_sku', 'Order 10005 held: SKU REDHOOD not found')"),
+      env.DB.prepare("INSERT INTO error_log (flow, ref, code, message, resolved) VALUES ('importOrders', '1', 'x', 'old', 1)"),
+    ]);
+    const all = (await (await call("/admin/errors")).json()) as { errors: { id: number; ref: string }[] };
+    expect(all.errors).toHaveLength(2);
+    const open = (await (await call("/admin/errors?unresolved=1")).json()) as { errors: { id: number; ref: string }[] };
+    expect(open.errors.map((e) => e.ref)).toEqual(["10005"]);
+    expect((await call(`/admin/errors/${open.errors[0]!.id}/resolve`, { method: "POST" })).status).toBe(200);
+    expect(((await (await call("/admin/errors?unresolved=1")).json()) as { errors: unknown[] }).errors).toEqual([]);
+    expect((await call("/admin/errors/99999/resolve", { method: "POST" })).status).toBe(404);
+  });
+
+  it("retry: 404 for unknown orders, 409 for orders that aren't held", async () => {
+    stubUpstreams();
+    await post("/admin/clients", createBody);
+    expect((await post("/admin/clients/wix-test/orders/10002/retry", {})).status).toBe(404);
+    await env.DB.prepare("INSERT INTO order_map (client_id, wix_order_id, wix_order_number, status) VALUES (1, 'w', '10002', 'imported')").run();
+    expect((await post("/admin/clients/wix-test/orders/10002/retry", {})).status).toBe(409);
   });
 });
 

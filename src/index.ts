@@ -16,8 +16,11 @@ import {
   putCarriersHandler,
   importProductsHandler,
   listClientsHandler,
+  listErrorsHandler,
   putCourierMapHandler,
   reconcileHandler,
+  resolveErrorHandler,
+  retryOrderHandler,
   runImportHandler,
 } from "./routes/admin";
 import { cancelWebhookHandler, despatchWebhookHandler } from "./routes/webhooks";
@@ -37,13 +40,16 @@ const router = new Router()
   .put("/admin/clients/:slug/courier-map", adminOnly(putCourierMapHandler))
   .post("/admin/clients/:slug/import-products", adminOnly(importProductsHandler))
   .post("/admin/clients/:slug/run-import", adminOnly(runImportHandler))
+  .post("/admin/clients/:slug/orders/:wixOrderNumber/retry", adminOnly(retryOrderHandler))
+  .get("/admin/errors", adminOnly(listErrorsHandler))
+  .post("/admin/errors/:id/resolve", adminOnly(resolveErrorHandler))
   .post("/admin/reconcile", adminOnly(reconcileHandler))
   .get("/admin/carriers", adminOnly(listCarriersHandler))
   .put("/admin/carriers", adminOnly(putCarriersHandler))
   // Mintsoft webhooks: authenticated by the per-client token in the URL, not the admin token.
   .post("/webhooks/mintsoft/despatch/:slug", despatchWebhookHandler)
   .post("/webhooks/mintsoft/cancel/:slug", cancelWebhookHandler);
-// TODO(Phase 3): /admin/clients/:slug/orders/:wixOrderNumber/retry, /admin/errors*, full /admin/health
+// TODO(Phase 3): fuller /admin/health (last run times per flow, counts by status).
 export default {
   async fetch(request, env, ctx): Promise<Response> {
     try {
