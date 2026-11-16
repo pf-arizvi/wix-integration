@@ -19,3 +19,6 @@ DEBUG_PAYLOADS=false
 MINTSOFT_WRITES_ENABLED=false
 MINTSOFT_ALLOWED_CLIENT_IDS=38
 MINTSOFT_WAREHOUSE_ID=3
+# Cloudflare Access for the admin page (leave empty locally; use the admin token)
+ACCESS_TEAM_DOMAIN=
+ACCESS_AUD=

@@ -63,7 +63,7 @@ function webhook(source: "mintsoft_despatch" | "mintsoft_cancel", run: typeof ha
         await recordError(env.DB, { clientId: client.id, flow: "pushTracking", ref: null, code: "despatch_payload_invalid", message: `${source} webhook body was not JSON` });
         return json({ ok: true, processed: false, reason: "invalid_json" });
       }
-      const result = await run(createFlowDeps(env), client, payload);
+      const result = await run(await createFlowDeps(env), client, payload);
       return json({ ok: true, processed: true, result });
     } catch (err) {
       log.error("webhook.failed", { source, client: client.slug, err });

@@ -27,7 +27,7 @@ export function wixOrder(overrides: Partial<WixOrder> = {}): WixOrder {
 
 export async function resetDb(): Promise<void> {
   await env.DB.batch(
-    ["webhook_log", "error_log", "carrier_names", "fulfilments", "sync_state", "order_map", "courier_map", "clients"].map((t) => env.DB.prepare(`DELETE FROM ${t}`)),
+    ["audit_log", "settings", "webhook_log", "error_log", "carrier_names", "fulfilments", "sync_state", "order_map", "courier_map", "clients"].map((t) => env.DB.prepare(`DELETE FROM ${t}`)),
   );
 }
 

@@ -19,6 +19,10 @@ export interface Env {
   MINTSOFT_ALLOWED_CLIENT_IDS: string;
   /** Mintsoft WarehouseId sent on every order. Same for all clients. */
   MINTSOFT_WAREHOUSE_ID: string;
+  /** Cloudflare Access team domain, e.g. "premiumfulfilment.cloudflareaccess.com". Empty = Access login off. */
+  ACCESS_TEAM_DOMAIN: string;
+  /** Cloudflare Access application AUD tag. Empty = Access login off. */
+  ACCESS_AUD: string;
 
   // Secrets (`wrangler secret put` / .dev.vars)
   MINTSOFT_API_KEY: string;

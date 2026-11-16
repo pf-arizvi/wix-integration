@@ -22,7 +22,7 @@ Hosting: Cloudflare Workers + D1 (free plan), repo `pf-arizvi/wix-integration`
 - Cancellations from Wix → later phase (log them, see §6.4).
 - Stock/inventory sync (stock comes in via ASNs in Mintsoft; never push stock from Wix).
 - Returns.
-- A web UI (admin is JSON endpoints + curl for now).
+- ~~A web UI~~: added 2026-11-16 at user request: an admin page at `/admin` (see §6.8).
 
 ---
 
@@ -369,6 +369,12 @@ Agreed 2026-11-15: run every 5 minutes, not hourly. The Mintsoft webhook does fi
 - `GET /admin/errors?unresolved=1` and `POST /admin/errors/:id/resolve`.
 - `GET /admin/health` — last run times per flow, counts by status.
 
+### 6.8 Admin page (`/admin`)
+Static HTML/CSS/JS served by the Worker (`src/ui/*`, CSP `script-src 'self'`), built on the `/admin/*` JSON API. Tabs: Overview (lamps for import / despatch / writes / needs attention; clients; activity; check despatches now), Orders (preview → import, held orders with retry / re-send, recent), Products (preview → create one → create all), Errors (resolve), Settings (courier map, carrier names, add client, audit log).
+- Sign-in: Cloudflare Access, verified in the Worker (RS256 signature against the team's certs, AUD, issuer, expiry; `ACCESS_TEAM_DOMAIN` / `ACCESS_AUD`). State-changing Access requests must send `X-Admin-UI: 1` (CSRF). The `ADMIN_TOKEN` bearer still works for CLI and as the owner fallback.
+- Writes toggle in D1 `settings` (migration 0005) under the deploy master; `audit_log` records who did what. Both crons store a last-run summary for the lamps.
+- New endpoints: `GET /admin/state`, `PUT /admin/settings/writes`, `GET /admin/clients/:slug/orders`, `GET /admin/clients/:slug/courier-map`, `GET /admin/audit`.
+
 ---
 
 ## 7. Configuration & secrets
@@ -377,7 +383,7 @@ Agreed 2026-11-15: run every 5 minutes, not hourly. The Mintsoft webhook does fi
 
 ### 7.1 Mintsoft write guardrails
 Enforced in `src/adapters/mintsoft/client.ts` (every write goes through one guarded function):
-1. **Kill switch** `MINTSOFT_WRITES_ENABLED`: only the exact string `true` enables writes (orders and products alike). Otherwise the cron import is skipped and `run-import` / `import-products` are dry runs that write nothing anywhere (Mintsoft, order_map, error_log, cursor, catalog_version) and return would-be payloads. While it is on, the 5-minute cron also imports orders.
+1. **Kill switch** `MINTSOFT_WRITES_ENABLED` (deploy-level master, now `"true"`) AND the admin page's writes toggle (D1, off by default): writes happen only when both are on (orders and products alike). Otherwise the cron import is skipped and `run-import` / `import-products` are dry runs that write nothing anywhere (Mintsoft, order_map, error_log, cursor, catalog_version) and return would-be payloads. While it is on, the 5-minute cron also imports orders.
 2. **ClientId allowlist** `MINTSOFT_ALLOWED_CLIENT_IDS`: any write whose body ClientId is not listed is refused before the request is sent.
 3. **Onboarding check**: `POST /admin/clients` requires `mintsoft_client_name`, and it must exactly equal the Name Mintsoft has for that ID.
 4. **Read-back**: after create, `GET /api/Order/{id}` / `GET /api/Product/{id}` must report the expected ClientId, otherwise the client is deactivated and the run halts.

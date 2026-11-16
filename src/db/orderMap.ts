@@ -152,3 +152,18 @@ export async function listHeldForRetry(
 export async function touchOrderMap(db: D1Database, clientId: number, wixOrderId: string): Promise<void> {
   await db.prepare("UPDATE order_map SET updated_at = datetime('now') WHERE client_id = ?1 AND wix_order_id = ?2").bind(clientId, wixOrderId).run();
 }
+
+/** Recent orders for the admin page (IDs + statuses only — no personal data is stored). */
+export async function listOrderMaps(db: D1Database, clientId: number, opts: { status: OrderStatus | null; limit: number }): Promise<OrderMapRecord[]> {
+  const { results } = opts.status
+    ? await db.prepare("SELECT * FROM order_map WHERE client_id = ?1 AND status = ?2 ORDER BY updated_at DESC LIMIT ?3").bind(clientId, opts.status, opts.limit).all<Row>()
+    : await db.prepare("SELECT * FROM order_map WHERE client_id = ?1 ORDER BY updated_at DESC LIMIT ?2").bind(clientId, opts.limit).all<Row>();
+  return results.map(toRecord);
+}
+
+export async function countOrdersByStatus(db: D1Database): Promise<{ clientId: number; status: OrderStatus; n: number }[]> {
+  const { results } = await db
+    .prepare("SELECT client_id, status, COUNT(*) AS n FROM order_map GROUP BY client_id, status")
+    .all<{ client_id: number; status: OrderStatus; n: number }>();
+  return results.map((r) => ({ clientId: r.client_id, status: r.status, n: r.n }));
+}

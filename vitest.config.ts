@@ -22,6 +22,8 @@ export default defineConfig(async () => {
             MINTSOFT_WRITES_ENABLED: "false",
             MINTSOFT_ALLOWED_CLIENT_IDS: "38",
             MINTSOFT_WAREHOUSE_ID: "3",
+            ACCESS_TEAM_DOMAIN: "",
+            ACCESS_AUD: "",
           },
         },
       }),

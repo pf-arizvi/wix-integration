@@ -3,7 +3,7 @@
  * request, no dependencies — keeps CPU per request negligible.
  */
 import type { Env } from "./env";
-import { requireAdmin } from "./lib/auth";
+import { authenticateAdmin } from "./lib/auth";
 import { errorJson } from "./lib/response";
 
 export type Params = Record<string, string>;
@@ -14,6 +14,8 @@ export interface RouteContext {
   ctx: ExecutionContext;
   params: Params;
   url: URL;
+  /** Set by adminOnly: who is acting (Access email or "admin-token"). */
+  actor?: string;
 }
 
 export type Handler = (c: RouteContext) => Response | Promise<Response>;
@@ -63,9 +65,13 @@ export class Router {
   }
 }
 
-/** Wraps a handler so it only runs with a valid admin bearer token. */
+/** Wraps a handler so it only runs for an authenticated admin (token or Cloudflare Access login). */
 export function adminOnly(handler: Handler): Handler {
-  return async (c) => (await requireAdmin(c.request, c.env)) ?? handler(c);
+  return async (c) => {
+    const id = await authenticateAdmin(c.request, c.env);
+    if (id instanceof Response) return id;
+    return handler({ ...c, actor: id.actor });
+  };
 }
 
 function split(path: string): string[] {

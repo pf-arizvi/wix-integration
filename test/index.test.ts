@@ -40,22 +40,25 @@ describe("scheduled", () => {
 });
 
 describe("migrations", () => {
-  it("creates all tables and indexes (SPEC §5 + migrations 0002–0004)", async () => {
+  it("creates all tables and indexes (SPEC §5 + migrations 0002–0005)", async () => {
     const { results } = await env.DB.prepare(
       "SELECT type, name FROM sqlite_master WHERE type IN ('table','index') AND name NOT LIKE 'sqlite_%' AND name NOT LIKE 'd1_%' AND name NOT LIKE '_cf_%' ORDER BY name",
     ).all<{ type: string; name: string }>();
     expect(results.map((r) => r.name)).toEqual([
+      "audit_log",
       "carrier_names",
       "clients",
       "courier_map",
       "error_log",
       "fulfilments",
+      "idx_audit_created",
       "idx_fulfilments_status",
       "idx_fulfilments_wix_order",
       "idx_order_map_held",
       "idx_order_map_mintsoft",
       "idx_order_map_status",
       "order_map",
+      "settings",
       "sync_state",
       "webhook_log",
     ]);

@@ -122,10 +122,10 @@ async function reconcileOne(
 }
 
 /** Cron entry (every 5 minutes, offset from the import). */
-export async function runReconcile(env: Env, _ctx: ExecutionContext): Promise<void> {
+export async function runReconcile(env: Env, _ctx: ExecutionContext): Promise<Record<string, unknown>> {
   const clients = await listActiveClients(env.DB);
-  if (!clients.length) return;
-  const deps = createFlowDeps(env);
+  if (!clients.length) return { clients: 0 };
+  const deps = await createFlowDeps(env);
   const r = await reconcileOnce(deps, clients);
   log.info("reconcile.done", {
     since: r.since,
@@ -138,4 +138,10 @@ export async function runReconcile(env: Env, _ctx: ExecutionContext): Promise<vo
     stoppedBy: r.stoppedBy,
     subrequestsLeft: deps.budget.remaining,
   });
+  return {
+    despatchedSeen: r.despatchedSeen,
+    pushed: r.results.filter((x) => x.outcome !== "error").length,
+    errors: r.results.filter((x) => x.outcome === "error").length,
+    stoppedBy: r.stoppedBy,
+  };
 }

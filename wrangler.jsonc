@@ -32,14 +32,20 @@
     "WORKER_BASE_URL": "https://wix-integration.pf-integrations.workers.dev",
 
     // ── Mintsoft write guardrails (enforced in src/adapters/mintsoft/client.ts) ──
-    // Master switch. "false" = nothing is ever written to Mintsoft; the cron import
-    // is skipped and admin run-import is a dry run that returns would-be payloads.
-    "MINTSOFT_WRITES_ENABLED": "false",
+    // Deploy-level MASTER. Writes happen only when this is exactly "true" AND the admin page's
+    // writes toggle (D1 settings, off until someone switches it on) is on. "false" locks writes
+    // off whatever the page says. Allowlist below always applies.
+    "MINTSOFT_WRITES_ENABLED": "true",
     // Comma-separated Mintsoft ClientIds that may be written to. Any write for
     // another ClientId is refused before it leaves the Worker. 38 = Wix Test Client.
     "MINTSOFT_ALLOWED_CLIENT_IDS": "38",
     // Mintsoft WarehouseId sent on every order (required by PUT /api/Order). Same for all clients.
-    "MINTSOFT_WAREHOUSE_ID": "3"
+    "MINTSOFT_WAREHOUSE_ID": "3",
+
+    // Cloudflare Access (admin page sign-in). Empty = Access login off; only the admin token works.
+    // Team domain e.g. "premiumfulfilment.cloudflareaccess.com"; AUD = the Access application's AUD tag.
+    "ACCESS_TEAM_DOMAIN": "",
+    "ACCESS_AUD": ""
   },
 
   "d1_databases": [

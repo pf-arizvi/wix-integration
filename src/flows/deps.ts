@@ -13,16 +13,35 @@ import { createWixApi, type WixApi } from "../adapters/wix/client";
 import { getOrder as getWixOrder, searchPaidUnfulfilledOrders } from "../adapters/wix/orders";
 import { allowedMintsoftClientIds, mintsoftWarehouseId, mintsoftWritesEnabled } from "../config";
 import type { ClientRecord } from "../db/clients";
+import { getSetting } from "../db/settings";
 import type { Env } from "../env";
 import { decryptSecret } from "../lib/crypto";
 import { createHttpClient, type HttpClient, SubrequestBudget } from "../lib/http";
 import type { CatalogSourcePort, FlowDeps, OrderSourcePort, WmsPort } from "./ports";
 
-export function createFlowDeps(env: Env, opts: { http?: HttpClient } = {}): FlowDeps {
+export interface WritesState {
+  /** MINTSOFT_WRITES_ENABLED (deploy-level master). */
+  master: boolean;
+  /** Admin-page toggle (D1 settings.mintsoft_writes). */
+  toggle: boolean;
+  /** Writes happen only when both are on. */
+  effective: boolean;
+  updatedBy: string | null;
+  updatedAt: string | null;
+}
+
+export async function mintsoftWritesState(env: Env): Promise<WritesState> {
+  const master = mintsoftWritesEnabled(env);
+  const s = await getSetting(env.DB, "mintsoft_writes");
+  const toggle = s?.value === "on";
+  return { master, toggle, effective: master && toggle, updatedBy: s?.updatedBy ?? null, updatedAt: s?.updatedAt ?? null };
+}
+
+export async function createFlowDeps(env: Env, opts: { http?: HttpClient; writesEnabled?: boolean } = {}): Promise<FlowDeps> {
   const budget = opts.http?.budget ?? new SubrequestBudget();
   const http = opts.http ?? createHttpClient({ budget });
   const allowedClientIds = allowedMintsoftClientIds(env);
-  const writesEnabled = mintsoftWritesEnabled(env);
+  const writesEnabled = opts.writesEnabled ?? (await mintsoftWritesState(env)).effective;
   const api = createMintsoftApi(http, { apiKey: env.MINTSOFT_API_KEY, writesEnabled, allowedClientIds });
 
   const wms: WmsPort = {

@@ -72,30 +72,45 @@ After the first deploy, set `WORKER_BASE_URL` in `wrangler.jsonc` to the deploye
 
 > ⚠️ `ENCRYPTION_KEY` decrypts every stored client Wix API key. Keep a copy in the team password manager. Losing it means re-entering every client's key, and changing it requires re-encrypting them.
 
+## Admin page
+
+`https://wix-integration.pf-integrations.workers.dev/admin` replaces most of the curl commands below with buttons:
+- **Overview:** lamps for Order import, Despatch → Wix, Mintsoft writes (with the Go live / Pause switch) and Needs attention; clients; recent activity; "Check despatches now".
+- **Orders:** preview an import (nothing written), then Import now; held orders with Check again / Retry / Re-send to Mintsoft; recent orders.
+- **Products:** preview the product import, create one, then create all.
+- **Errors:** unresolved errors, with Resolve.
+- **Settings:** courier map, carrier names, add a client, audit log.
+
+Every action that writes to Mintsoft is reached through a preview and a confirmation naming the target client and warehouse. Every change is recorded in the audit log with who made it.
+
+**Sign-in** is Cloudflare Access (each person's work email). Until Access is set up, the page offers an owner fallback: paste the `ADMIN_TOKEN`, which is kept for that browser tab only. The JSON API accepts either a verified Access login or `Authorization: Bearer <ADMIN_TOKEN>`.
+
+### Setting up Cloudflare Access (once)
+1. Cloudflare dashboard → **Zero Trust**. Pick a team name; the team domain is `<team>.cloudflareaccess.com`. The free plan covers 50 users.
+2. **Access → Applications → Add an application → Self-hosted.** Domain `wix-integration.pf-integrations.workers.dev`, path `admin`. Session duration: e.g. 24h.
+3. Add a policy: **Allow**, Include → Emails → the people who should have access. Login method: One-time PIN.
+4. Copy the application's **AUD tag**. Set `ACCESS_TEAM_DOMAIN` and `ACCESS_AUD` in `wrangler.jsonc`, then `npm run deploy`.
+5. Don't put Access in front of `/webhooks/*` or `/healthz`, because Mintsoft has to reach the despatch webhook. Once `/admin` is behind Access, curl calls to `/admin/*` need an Access service token (or use the page).
+
 ## Mintsoft write guardrails
 
-Nothing is written to Mintsoft unless **both** are true. Both are checked in `src/adapters/mintsoft/client.ts` before any request leaves the Worker:
+Nothing is written to Mintsoft unless **all** of these hold (checked in `src/adapters/mintsoft/client.ts` before any request leaves the Worker):
 
-| Var (`wrangler.jsonc`) | Default | Effect |
+| Control | Where | Effect |
 |---|---|---|
-| `MINTSOFT_WRITES_ENABLED` | `"false"` | Only the exact string `"true"` allows any write (orders or products). Otherwise the cron import is skipped, and `run-import` and `import-products` are dry runs. |
-| `MINTSOFT_ALLOWED_CLIENT_IDS` | `"38"` | Comma-separated. A write for any other ClientId is refused. |
-| `MINTSOFT_WAREHOUSE_ID` | `"3"` | WarehouseId sent on every order (Mintsoft requires one). The same for all clients. If it's missing or invalid, order import refuses to run. |
+| `MINTSOFT_WRITES_ENABLED` | `wrangler.jsonc` (deploy) | Master. Only the exact string `"true"` allows writes at all; anything else locks them off, whatever the page says. |
+| Writes switch | Admin page (D1 `settings`) | **Off until someone switches it on.** Live/Paused, with who and when. Only works while the master is `"true"`. |
+| `MINTSOFT_ALLOWED_CLIENT_IDS` | `wrangler.jsonc` (deploy) | `"38"`. A write for any other ClientId is refused. The page can't change it. |
+| `MINTSOFT_WAREHOUSE_ID` | `wrangler.jsonc` (deploy) | `"3"`. WarehouseId sent on every order (Mintsoft requires one). |
 
 On top of that:
 - **Onboarding** checks the client's ID and exact name against Mintsoft before anything is saved.
 - **Every created order and product is read back** to confirm its ClientId. On a mismatch the client is deactivated and the run halts.
 - **The SKU lookup is proven before it's trusted.** After the first product created in each request, the import looks that SKU up again. If the lookup doesn't return the new product, the import halts, because a lookup it can't trust would create duplicates on the next run.
 
-> ⚠️ **While writes are on, the 5-minute cron also imports paid, unfulfilled Wix orders** for every active client. Turn writes on only for as long as needed, and only after checking which orders would import (run the order dry run first).
+> ⚠️ **While writes are live, the 5-minute cron imports every paid, unfulfilled Wix order** for every active client. Preview first (Orders tab).
 
-A **dry run** writes nothing anywhere: not Mintsoft, and not D1 (no rows, no errors, cursor unchanged). It returns the exact payloads that *would* be sent. Order payloads include customer name and address, so dry runs are admin-only and never logged.
-
-To switch writes on for a one-off job without committing `"true"`, pass the var at deploy time. Then deploy again without it to switch back off:
-```sh
-npx wrangler deploy --var MINTSOFT_WRITES_ENABLED:true   # on
-npm run deploy                                            # back to the committed "false"
-```
+A **preview / dry run** writes nothing anywhere. It returns the exact payloads that *would* be sent. Order payloads include customer name and address, so they are shown only to signed-in admins and never logged.
 
 ## Onboarding a client (admin API)
 

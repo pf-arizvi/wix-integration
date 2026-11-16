@@ -30,7 +30,6 @@ import {
   HELD_RETRY_INTERVAL_MINUTES,
   HELD_RETRY_MAX_DAYS,
   maxOrdersPerRun,
-  mintsoftWritesEnabled,
   ORDERS_CURSOR_OVERLAP_MS,
   WIX_ORDER_PAGE_SIZE,
 } from "../config";
@@ -47,7 +46,7 @@ import { webhookUrls, type WebhookUrls } from "../lib/webhookUrls";
 import { type CourierRule, resolveCourier } from "../mapping/courierMap";
 import { mapWixOrderToMintsoft } from "../mapping/orderMapper";
 import { validateWixOrder } from "../mapping/validation";
-import { createFlowDeps } from "./deps";
+import { createFlowDeps, mintsoftWritesState } from "./deps";
 import { ImportConfigError, ImportHaltedError } from "./errors";
 import type { FlowDeps } from "./ports";
 
@@ -421,12 +420,15 @@ function errMessage(err: unknown): string {
 }
 
 /** Cron entry. Skipped entirely while Mintsoft writes are disabled. */
-export async function runImportOrders(env: Env, _ctx: ExecutionContext): Promise<void> {
-  if (!mintsoftWritesEnabled(env)) {
-    log.info("importOrders.skipped", { reason: "MINTSOFT_WRITES_ENABLED is not true" });
-    return;
+export async function runImportOrders(env: Env, _ctx: ExecutionContext): Promise<Record<string, unknown>> {
+  const writes = await mintsoftWritesState(env);
+  if (!writes.effective) {
+    const reason = !writes.master ? "MINTSOFT_WRITES_ENABLED (master) is not true" : "writes are paused in the admin page";
+    log.info("importOrders.skipped", { reason });
+    return { skipped: reason };
   }
-  const deps = createFlowDeps(env);
+  const totals = { imported: 0, held: 0, skipped: 0, retried: 0 };
+  const deps = await createFlowDeps(env, { writesEnabled: true });
   let remaining = maxOrdersPerRun(env);
 
   for (const client of await listActiveClients(env.DB)) {
@@ -434,6 +436,11 @@ export async function runImportOrders(env: Env, _ctx: ExecutionContext): Promise
     try {
       const r = await importOrdersForClient(deps, client, { limit: remaining, dryRun: false });
       remaining -= r.processed;
+      for (const o of r.outcomes) {
+        if (o.outcome === "imported" || o.outcome === "already_in_mintsoft") totals.imported++;
+        else if (o.outcome === "held") totals.held++;
+        else totals.skipped++;
+      }
       log.info("importOrders.client_done", {
         client: client.slug,
         seen: r.ordersSeen,
@@ -458,4 +465,7 @@ export async function runImportOrders(env: Env, _ctx: ExecutionContext): Promise
   if (retried.length) {
     log.info("importOrders.held_retried", { results: retried.map((r) => ({ order: r.wixOrderNumber, outcome: r.outcome })) });
   }
+  totals.retried = retried.length;
+  totals.imported += retried.filter((o) => o.outcome === "imported" || o.outcome === "already_in_mintsoft").length;
+  return totals;
 }
