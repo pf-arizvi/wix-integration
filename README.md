@@ -92,6 +92,9 @@ Every action that writes to Mintsoft is reached through a preview and a confirma
 4. Copy the application's **AUD tag**. Set `ACCESS_TEAM_DOMAIN` and `ACCESS_AUD` in `wrangler.jsonc`, then `npm run deploy`.
 5. Don't put Access in front of `/webhooks/*` or `/healthz`, because Mintsoft has to reach the despatch webhook. Once `/admin` is behind Access, curl calls to `/admin/*` need an Access service token (or use the page).
 
+### PF Hub (ARAnalytics) connection
+The PF Hub has a native "Wix Integration" page for warehouse staff. Its server calls this Worker's `/admin/*` API with the `ADMIN_TOKEN` (stored on Render as `WIX_INTEGRATION_TOKEN`) and sends `X-Actor: <hub username>`, so the audit log records `hub:<username>` rather than the shared token. `X-Actor` is only honoured on requests that already carry a valid admin token. Once Cloudflare Access protects `/admin`, create an Access **service token**, add a "Service Auth" policy for it to the Access application, and set `WIX_INTEGRATION_ACCESS_CLIENT_ID` / `WIX_INTEGRATION_ACCESS_CLIENT_SECRET` on Render.
+
 ## Mintsoft write guardrails
 
 Nothing is written to Mintsoft unless **all** of these hold (checked in `src/adapters/mintsoft/client.ts` before any request leaves the Worker):

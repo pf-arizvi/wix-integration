@@ -53,6 +53,12 @@ export interface AdminIdentity {
 
 const SAFE_METHODS = new Set(["GET", "HEAD"]);
 
+/** X-Actor from the Hub: a username/email, no spaces or control characters, ≤ 200 chars. */
+export function actorHeader(v: string | null): string | null {
+  const s = (v ?? "").trim().toLowerCase();
+  return /^[a-z0-9._%+@-]{1,200}$/.test(s) ? s : null;
+}
+
 /**
  * Admin auth for the API and the admin page. Accepts either:
  *   - `Authorization: Bearer <ADMIN_TOKEN>` (curl / scripts), or
@@ -66,7 +72,12 @@ export async function authenticateAdmin(
   opts: { fetch?: typeof fetch } = {},
 ): Promise<AdminIdentity | Response> {
   if (request.headers.has("Authorization")) {
-    return (await requireAdmin(request, env)) ?? { actor: "admin-token", via: "admin-token" };
+    const denied = await requireAdmin(request, env);
+    if (denied) return denied;
+    // A trusted caller holding the admin token (the PF Hub server) names the person acting,
+    // so the audit log shows "hub:<username>" instead of the shared token.
+    const onBehalf = actorHeader(request.headers.get("X-Actor"));
+    return { actor: onBehalf ? `hub:${onBehalf}` : "admin-token", via: "admin-token" };
   }
   const cfg = accessConfig(env);
   const token = accessToken(request);

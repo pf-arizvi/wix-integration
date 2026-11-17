@@ -79,6 +79,17 @@ describe("authenticateAdmin", () => {
     expect(await authenticateAdmin(req("POST", { Authorization: `Bearer ${ENV.ADMIN_TOKEN}` }), ENV)).toEqual({ actor: "admin-token", via: "admin-token" });
   });
 
+  it("records the Hub user from X-Actor when the admin token is valid, and ignores junk", async () => {
+    const auth = { Authorization: `Bearer ${ENV.ADMIN_TOKEN}` };
+    expect(await authenticateAdmin(req("POST", { ...auth, "X-Actor": "ARizvi@PremiumFulfilment.co.uk" }), ENV)).toEqual({
+      actor: "hub:arizvi@premiumfulfilment.co.uk",
+      via: "admin-token",
+    });
+    expect(await authenticateAdmin(req("POST", { ...auth, "X-Actor": "a b\u0007<script>" }), ENV)).toEqual({ actor: "admin-token", via: "admin-token" });
+    // X-Actor never authenticates on its own.
+    expect(((await authenticateAdmin(req("POST", { "X-Actor": "arizvi@premiumfulfilment.co.uk" }), ENV)) as Response).status).toBe(401);
+  });
+
   it("accepts an Access login on GET; requires X-Admin-UI on state-changing requests", async () => {
     const jwt = await sign(good());
     expect(await authenticateAdmin(req("GET", { "Cf-Access-Jwt-Assertion": jwt }), ENV, { fetch: certsFetch })).toEqual({
