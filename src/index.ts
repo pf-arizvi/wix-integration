@@ -71,8 +71,12 @@ export default {
     try {
       return await router.handle(request, env, ctx);
     } catch (err) {
-      log.error("http.unhandled", { path: new URL(request.url).pathname, err });
-      return errorJson(500, "internal_error");
+      const path = new URL(request.url).pathname;
+      log.error("http.unhandled", { path, err });
+      // Admin routes are authenticated before any handler runs, so the cause can be shown to
+      // the caller; public paths get the bare code.
+      const detail = path.startsWith("/admin/") && err instanceof Error ? err.message.slice(0, 300) : undefined;
+      return errorJson(500, "internal_error", detail);
     }
   },
 
